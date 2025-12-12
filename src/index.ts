@@ -1,0 +1,107 @@
+/**
+ * Tabby Warpgate Plugin
+ *
+ * A comprehensive Warpgate SSH gateway integration for Tabby terminal.
+ * Provides one-click SSH and SFTP connections to hosts through Warpgate.
+ *
+ * Features:
+ * - Multiple Warpgate server support
+ * - Automatic authentication and session management
+ * - One-click SSH connections to any Warpgate target
+ * - SFTP file browser integration
+ * - Host grouping and search
+ * - Auto-refresh of host lists
+ * - Toolbar quick access button
+ * - Full settings UI for server configuration
+ *
+ * @module tabby-warpgate
+ */
+
+import { NgModule } from '@angular/core';
+import { CommonModule } from '@angular/common';
+import { FormsModule } from '@angular/forms';
+import {
+  TabbyCoreModule,
+  ConfigProvider,
+  ToolbarButtonProvider,
+  HotkeyProvider,
+  ProfileProvider,
+} from 'tabby-core';
+import { SettingsTabProvider, TabbySettingsModule } from 'tabby-settings';
+
+// Services
+import { WarpgateService } from './services/warpgate.service';
+import {
+  WarpgateProfileProvider,
+  WarpgateSFTPProfileProvider,
+} from './services/warpgate-profile.service';
+
+// Components
+import { WarpgateSettingsComponent } from './components/warpgate-settings.component';
+import { WarpgateHostsComponent } from './components/warpgate-hosts.component';
+import {
+  WarpgateToolbarButtonProvider,
+  WarpgateDockComponent,
+} from './components/warpgate-toolbar.component';
+
+// Providers
+import { WarpgateConfigProvider } from './providers/config.provider';
+import { WarpgateSettingsTabProvider } from './providers/settings-tab.provider';
+import { WarpgateHotkeyProvider } from './providers/hotkey.provider';
+
+/**
+ * Warpgate Plugin Module
+ *
+ * Main Angular module that registers all plugin components and services.
+ */
+@NgModule({
+  imports: [
+    CommonModule,
+    FormsModule,
+    TabbyCoreModule,
+    TabbySettingsModule,
+  ],
+  declarations: [
+    WarpgateSettingsComponent,
+    WarpgateHostsComponent,
+    WarpgateDockComponent,
+  ],
+  providers: [
+    // Core services
+    WarpgateService,
+    WarpgateProfileProvider,
+    WarpgateSFTPProfileProvider,
+
+    // Configuration provider
+    { provide: ConfigProvider, useClass: WarpgateConfigProvider, multi: true },
+
+    // Settings tab provider
+    { provide: SettingsTabProvider, useClass: WarpgateSettingsTabProvider, multi: true },
+
+    // Toolbar button provider
+    { provide: ToolbarButtonProvider, useClass: WarpgateToolbarButtonProvider, multi: true },
+
+    // Hotkey provider
+    { provide: HotkeyProvider, useClass: WarpgateHotkeyProvider, multi: true },
+
+    // Profile providers
+    { provide: ProfileProvider, useExisting: WarpgateProfileProvider, multi: true },
+    { provide: ProfileProvider, useExisting: WarpgateSFTPProfileProvider, multi: true },
+  ],
+  exports: [
+    WarpgateHostsComponent,
+    WarpgateDockComponent,
+  ],
+})
+export default class WarpgateModule {
+  constructor(private warpgateService: WarpgateService) {
+    // Service is initialized via constructor injection
+    console.log('Tabby Warpgate plugin loaded');
+  }
+}
+
+// Export public API
+export * from './models/warpgate.models';
+export * from './api/warpgate.api';
+export * from './services/warpgate.service';
+export * from './services/warpgate-profile.service';

@@ -1,0 +1,84 @@
+{
+  "name": "tabby-warpgate",
+  "version": "1.0.0",
+  "description": "Warpgate SSH gateway integration for Tabby - connect to SSH hosts through Warpgate with one click",
+  "keywords": [
+    "tabby-plugin",
+    "warpgate",
+    "ssh",
+    "sftp",
+    "bastion",
+    "gateway"
+  ],
+  "author": "AliAssassiN",
+  "license": "MIT",
+  "main": "dist/index.js",
+  "typings": "dist/index.d.ts",
+  "scripts": {
+    "build": "webpack --progress --color",
+    "watch": "webpack --progress --color --watch",
+    "lint": "eslint src/**/*.ts",
+    "test": "jest --coverage",
+    "test:watch": "jest --watch",
+    "prepublishOnly": "npm run build"
+  },
+  "files": [
+    "dist"
+  ],
+  "devDependencies": {
+    "@angular/animations": "~16.2.0",
+    "@angular/common": "~16.2.0",
+    "@angular/compiler": "~16.2.0",
+    "@angular/core": "~16.2.0",
+    "@angular/forms": "~16.2.0",
+    "@angular/platform-browser": "~16.2.0",
+    "@angular/platform-browser-dynamic": "~16.2.0",
+    "@ng-bootstrap/ng-bootstrap": "~15.0.0",
+    "@types/jest": "^29.5.0",
+    "@types/node": "^20.0.0",
+    "@typescript-eslint/eslint-plugin": "^6.0.0",
+    "@typescript-eslint/parser": "^6.0.0",
+    "apply-loader": "^2.0.0",
+    "css-loader": "^6.8.0",
+    "eslint": "^8.50.0",
+    "jest": "^29.7.0",
+    "ngx-toastr": "^17.0.0",
+    "pug": "^3.0.0",
+    "pug-loader": "^2.4.0",
+    "rxjs": "~7.8.0",
+    "sass": "^1.69.0",
+    "sass-loader": "^13.3.0",
+    "style-loader": "^3.3.0",
+    "ts-jest": "^29.1.0",
+    "ts-loader": "^9.5.0",
+    "typescript": "~5.1.0",
+    "webpack": "^5.89.0",
+    "webpack-cli": "^5.1.0",
+    "zone.js": "~0.13.0"
+  },
+  "peerDependencies": {
+    "@angular/common": ">=15.0.0",
+    "@angular/core": ">=15.0.0",
+    "@angular/forms": ">=15.0.0",
+    "tabby-core": "*",
+    "tabby-settings": "*",
+    "tabby-ssh": "*",
+    "tabby-terminal": "*"
+  },
+  "peerDependenciesMeta": {
+    "tabby-core": { "optional": false },
+    "tabby-settings": { "optional": false },
+    "tabby-ssh": { "optional": false },
+    "tabby-terminal": { "optional": true }
+  },
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/0x416c69/tabby-warpgate"
+  },
+  "bugs": {
+    "url": "https://github.com/0x416c69/tabby-warpgate/issues"
+  },
+  "engines": {
+    "node": ">=18.0.0"
+  }
+}
