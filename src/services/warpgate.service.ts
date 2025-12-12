@@ -17,6 +17,7 @@ import {
   WarpgateSession,
   WarpgateCachedTicket,
 } from '../models/warpgate.models';
+import { generateTOTP, isValidTOTPSecret } from '../utils/totp';
 
 /** Event types for Warpgate service events */
 export type WarpgateEventType =
@@ -420,7 +421,14 @@ export class WarpgateService {
   getSshConnectionDetails(
     serverId: string,
     targetName: string
-  ): { host: string; port: number; username: string; password?: string; useTicket: boolean } | null {
+  ): {
+    host: string;
+    port: number;
+    username: string;
+    password?: string;
+    useTicket: boolean;
+    hasOtpSecret: boolean;
+  } | null {
     const server = this.getServer(serverId);
     const client = this.clients.get(serverId);
 
@@ -431,6 +439,7 @@ export class WarpgateService {
     // Check if we have a valid cached ticket
     const ticketKey = `${serverId}:${targetName}`;
     const cachedTicket = this.ticketCache.get(ticketKey);
+    const hasOtpSecret = !!(server.otpSecret && isValidTOTPSecret(server.otpSecret));
 
     if (cachedTicket && this.isTicketValid(cachedTicket)) {
       // Use ticket-based authentication (one-click, no password prompt)
@@ -439,6 +448,7 @@ export class WarpgateService {
         port: client.getSshPort(),
         username: client.generateTicketUsername(cachedTicket.secret),
         useTicket: true,
+        hasOtpSecret,
       };
     }
 
@@ -449,6 +459,7 @@ export class WarpgateService {
       username: `${server.username}:${targetName}`,
       password: server.password,
       useTicket: false,
+      hasOtpSecret,
     };
   }
 
@@ -570,6 +581,209 @@ export class WarpgateService {
       if (key.startsWith(`${serverId}:`)) {
         this.ticketCache.delete(key);
       }
+    }
+  }
+
+  /**
+   * Generate a TOTP code for a server's configured OTP secret
+   * Used for automatic OTP authentication in fallback mode
+   * @param serverId Server ID
+   * @returns Current TOTP code or null if no OTP secret configured
+   */
+  async generateOtpCode(serverId: string): Promise<string | null> {
+    const server = this.getServer(serverId);
+    if (!server?.otpSecret || !isValidTOTPSecret(server.otpSecret)) {
+      return null;
+    }
+
+    try {
+      return await generateTOTP(server.otpSecret);
+    } catch (error) {
+      const errorMessage = error instanceof Error ? error.message : 'Unknown error';
+      this.showNotification('error', `Failed to generate OTP: ${errorMessage}`);
+      return null;
+    }
+  }
+
+  /**
+   * Check if a server has OTP configured for automatic authentication
+   * @param serverId Server ID
+   */
+  hasOtpSecret(serverId: string): boolean {
+    const server = this.getServer(serverId);
+    return !!(server?.otpSecret && isValidTOTPSecret(server.otpSecret));
+  }
+
+  /**
+   * Set the OTP secret for a server (for automatic OTP in fallback auth)
+   * @param serverId Server ID
+   * @param otpSecret Base32-encoded TOTP secret
+   */
+  async setOtpSecret(serverId: string, otpSecret: string): Promise<void> {
+    if (otpSecret && !isValidTOTPSecret(otpSecret)) {
+      throw new Error('Invalid OTP secret format. Must be a valid Base32 string.');
+    }
+
+    await this.updateServer(serverId, { otpSecret: otpSecret || undefined });
+  }
+
+  /**
+   * Clear the OTP secret for a server
+   * @param serverId Server ID
+   */
+  async clearOtpSecret(serverId: string): Promise<void> {
+    await this.updateServer(serverId, { otpSecret: undefined });
+  }
+
+  /**
+   * Get full authentication credentials for SSH connection
+   * This method provides everything needed for fully automatic authentication
+   * including password and OTP code for keyboard-interactive auth
+   */
+  async getFullAuthCredentials(
+    serverId: string,
+    targetName: string
+  ): Promise<{
+    host: string;
+    port: number;
+    username: string;
+    password?: string;
+    otpCode?: string;
+    useTicket: boolean;
+  } | null> {
+    const connectionDetails = this.getSshConnectionDetails(serverId, targetName);
+    if (!connectionDetails) {
+      return null;
+    }
+
+    // If using ticket auth, no additional credentials needed
+    if (connectionDetails.useTicket) {
+      return {
+        host: connectionDetails.host,
+        port: connectionDetails.port,
+        username: connectionDetails.username,
+        useTicket: true,
+      };
+    }
+
+    // For fallback auth, include password and generate OTP if available
+    const otpCode = connectionDetails.hasOtpSecret
+      ? await this.generateOtpCode(serverId)
+      : undefined;
+
+    return {
+      host: connectionDetails.host,
+      port: connectionDetails.port,
+      username: connectionDetails.username,
+      password: connectionDetails.password,
+      otpCode: otpCode ?? undefined,
+      useTicket: false,
+    };
+  }
+
+  /**
+   * Auto-setup OTP for a server
+   * This generates a new TOTP secret, registers it with Warpgate via the
+   * self-service API, and stores the secret locally for automatic OTP generation.
+   *
+   * @param serverId Server ID
+   * @returns Success status and the registered secret (for display to user if needed)
+   */
+  async autoSetupOtp(serverId: string): Promise<{
+    success: boolean;
+    secret?: string;
+    error?: string;
+  }> {
+    const client = this.clients.get(serverId);
+    if (!client) {
+      return { success: false, error: 'Server not connected' };
+    }
+
+    try {
+      // Check if OTP is already set up on Warpgate
+      const hasOtp = await client.hasProfileOtp();
+      if (hasOtp) {
+        // OTP is already enabled on Warpgate
+        // Check if we have the secret stored locally
+        if (this.hasOtpSecret(serverId)) {
+          return { success: true, secret: this.getServer(serverId)?.otpSecret };
+        }
+        return {
+          success: false,
+          error: 'OTP is already enabled on Warpgate but no secret stored locally. Please disable OTP on Warpgate first or enter your existing secret manually.',
+        };
+      }
+
+      // Auto-setup: generate secret and register with Warpgate
+      const result = await client.autoSetupOtp();
+
+      if (result.success && result.data) {
+        // Store the secret locally
+        await this.setOtpSecret(serverId, result.data.secret);
+
+        this.showNotification('info', 'OTP has been automatically configured for this server');
+
+        return {
+          success: true,
+          secret: result.data.secret,
+        };
+      } else {
+        return {
+          success: false,
+          error: result.error?.message || 'Failed to set up OTP',
+        };
+      }
+    } catch (error) {
+      const errorMessage = error instanceof Error ? error.message : 'Unknown error';
+      return { success: false, error: errorMessage };
+    }
+  }
+
+  /**
+   * Check if OTP is enabled on the Warpgate server for the current user
+   * @param serverId Server ID
+   */
+  async isOtpEnabledOnServer(serverId: string): Promise<boolean> {
+    const client = this.clients.get(serverId);
+    if (!client) {
+      return false;
+    }
+
+    try {
+      return await client.hasProfileOtp();
+    } catch {
+      return false;
+    }
+  }
+
+  /**
+   * Disable OTP on both Warpgate and locally
+   * @param serverId Server ID
+   */
+  async disableOtp(serverId: string): Promise<{ success: boolean; error?: string }> {
+    const client = this.clients.get(serverId);
+    if (!client) {
+      return { success: false, error: 'Server not connected' };
+    }
+
+    try {
+      // Get current OTP credentials
+      const credentials = await client.getProfileCredentials();
+      if (credentials.success && credentials.data?.otp && credentials.data.otp.length > 0) {
+        // Disable each OTP credential on Warpgate
+        for (const credId of credentials.data.otp) {
+          await client.disableProfileOtp(credId);
+        }
+      }
+
+      // Clear local secret
+      await this.clearOtpSecret(serverId);
+
+      this.showNotification('info', 'OTP has been disabled');
+      return { success: true };
+    } catch (error) {
+      const errorMessage = error instanceof Error ? error.message : 'Unknown error';
+      return { success: false, error: errorMessage };
     }
   }
 

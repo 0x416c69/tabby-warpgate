@@ -13,6 +13,10 @@ import {
   WarpgateTicketRequest,
   WarpgateTicket,
   WarpgateTicketAndSecret,
+  WarpgateOtpCredential,
+  WarpgateUser,
+  WarpgateProfileCredentials,
+  WarpgateOtpEnableResponse,
 } from '../models/warpgate.models';
 
 /** HTTP methods supported by the API client */
@@ -462,6 +466,194 @@ export class WarpgateApiClient {
     } catch {
       return 2222;
     }
+  }
+
+  /**
+   * Get list of all users (admin API)
+   */
+  async getUsers(): Promise<ApiResponse<WarpgateUser[]>> {
+    return this.request<WarpgateUser[]>('/users');
+  }
+
+  /**
+   * Get a specific user by ID (admin API)
+   * @param userId User ID
+   */
+  async getUser(userId: string): Promise<ApiResponse<WarpgateUser>> {
+    return this.request<WarpgateUser>(`/users/${userId}`);
+  }
+
+  /**
+   * Get user by username (admin API)
+   * Searches users and finds match by username
+   * @param username Username to find
+   */
+  async getUserByUsername(username: string): Promise<ApiResponse<WarpgateUser | null>> {
+    const response = await this.getUsers();
+    if (response.success && response.data) {
+      const user = response.data.find(u => u.username === username);
+      return { success: true, data: user || null };
+    }
+    return { success: false, error: response.error };
+  }
+
+  /**
+   * Get OTP credentials for a user (admin API)
+   * @param userId User ID
+   */
+  async getOtpCredentials(userId: string): Promise<ApiResponse<WarpgateOtpCredential[]>> {
+    return this.request<WarpgateOtpCredential[]>(`/users/${userId}/credentials/otp`);
+  }
+
+  /**
+   * Create OTP credential for a user (admin API)
+   * @param userId User ID
+   * @param secretKey Base32-decoded secret as byte array
+   */
+  async createOtpCredential(
+    userId: string,
+    secretKey: number[]
+  ): Promise<ApiResponse<WarpgateOtpCredential>> {
+    return this.request<WarpgateOtpCredential>(`/users/${userId}/credentials/otp`, {
+      method: 'POST',
+      body: { secret_key: secretKey },
+    });
+  }
+
+  /**
+   * Delete OTP credential for a user (admin API)
+   * @param userId User ID
+   * @param credentialId Credential ID
+   */
+  async deleteOtpCredential(userId: string, credentialId: string): Promise<ApiResponse<void>> {
+    return this.request<void>(`/users/${userId}/credentials/otp/${credentialId}`, {
+      method: 'DELETE',
+    });
+  }
+
+  /**
+   * Check if user has OTP configured
+   * @param userId User ID
+   */
+  async hasOtpCredential(userId: string): Promise<boolean> {
+    const response = await this.getOtpCredentials(userId);
+    return !!(response.success && response.data && response.data.length > 0);
+  }
+
+  // ============================================================================
+  // Self-Service Profile API (no admin required)
+  // These endpoints allow users to manage their own credentials
+  // ============================================================================
+
+  /**
+   * Get current user's credential state
+   * This is a self-service endpoint - no admin required
+   */
+  async getProfileCredentials(): Promise<ApiResponse<WarpgateProfileCredentials>> {
+    return this.request<WarpgateProfileCredentials>('/profile/credentials');
+  }
+
+  /**
+   * Enable OTP for the current user (self-service)
+   * Generates a new TOTP secret and registers it with Warpgate
+   * @param secret Base32-encoded TOTP secret to register
+   */
+  async enableProfileOtp(secret: string): Promise<ApiResponse<WarpgateOtpEnableResponse>> {
+    return this.request<WarpgateOtpEnableResponse>('/profile/credentials/otp', {
+      method: 'POST',
+      body: { secret },
+    });
+  }
+
+  /**
+   * Disable OTP for the current user (self-service)
+   * @param credentialId The OTP credential ID to remove
+   */
+  async disableProfileOtp(credentialId: string): Promise<ApiResponse<void>> {
+    return this.request<void>(`/profile/credentials/otp/${credentialId}`, {
+      method: 'DELETE',
+    });
+  }
+
+  /**
+   * Check if current user has OTP enabled (self-service)
+   */
+  async hasProfileOtp(): Promise<boolean> {
+    const response = await this.getProfileCredentials();
+    return !!(response.success && response.data && response.data.otp && response.data.otp.length > 0);
+  }
+
+  /**
+   * Auto-setup OTP for the current user
+   * Generates a new secret, registers it with Warpgate, and returns the secret
+   * @returns The TOTP secret that was registered (store this for automatic OTP generation)
+   */
+  async autoSetupOtp(): Promise<ApiResponse<{ secret: string; credentialId: string }>> {
+    // Generate a random TOTP secret
+    const secret = this.generateTotpSecret();
+
+    // Register it with Warpgate
+    const response = await this.enableProfileOtp(secret);
+
+    if (response.success && response.data) {
+      return {
+        success: true,
+        data: {
+          secret,
+          credentialId: response.data.id,
+        },
+      };
+    }
+
+    return {
+      success: false,
+      error: response.error || {
+        status: 0,
+        message: 'Failed to enable OTP',
+      },
+    };
+  }
+
+  /**
+   * Generate a random Base32-encoded TOTP secret
+   * @param length Number of bytes (default: 20 for 160-bit secret)
+   */
+  private generateTotpSecret(length = 20): string {
+    const BASE32_CHARS = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ234567';
+    let randomBytes: Uint8Array;
+
+    // Check environment for crypto
+    if (typeof window !== 'undefined' && window.crypto?.getRandomValues) {
+      randomBytes = new Uint8Array(length);
+      window.crypto.getRandomValues(randomBytes);
+    } else {
+      // Node.js environment
+      // eslint-disable-next-line @typescript-eslint/no-require-imports
+      const crypto = require('crypto');
+      randomBytes = new Uint8Array(crypto.randomBytes(length));
+    }
+
+    // Encode to Base32
+    let result = '';
+    let buffer = 0;
+    let bitsLeft = 0;
+
+    for (let i = 0; i < randomBytes.length; i++) {
+      buffer = (buffer << 8) | randomBytes[i];
+      bitsLeft += 8;
+
+      while (bitsLeft >= 5) {
+        bitsLeft -= 5;
+        result += BASE32_CHARS[(buffer >> bitsLeft) & 0x1f];
+      }
+    }
+
+    // Handle remaining bits
+    if (bitsLeft > 0) {
+      result += BASE32_CHARS[(buffer << (5 - bitsLeft)) & 0x1f];
+    }
+
+    return result;
   }
 }
 

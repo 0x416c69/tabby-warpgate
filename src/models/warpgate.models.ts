@@ -73,6 +73,8 @@ export interface WarpgateServerConfig {
   enabled: boolean;
   lastConnected?: Date;
   trustSelfSigned?: boolean;
+  /** Base32-encoded TOTP secret for automatic OTP generation (fallback auth) */
+  otpSecret?: string;
 }
 
 /** Connection status for a Warpgate server */
@@ -179,4 +181,72 @@ export interface WarpgateCachedTicket {
   expiresAt: Date | null;
   /** Remaining uses (-1 for unlimited, 0 means expired) */
   usesLeft: number;
+}
+
+/** OTP credential stored in Warpgate */
+export interface WarpgateOtpCredential {
+  /** Unique credential ID */
+  id: string;
+}
+
+/** Request to create a new OTP credential */
+export interface WarpgateOtpCredentialRequest {
+  /** Base32-encoded TOTP secret key */
+  secret_key: number[];
+}
+
+/** OTP credential with secret for local storage */
+export interface WarpgateCachedOtpCredential {
+  /** Server ID this OTP is for */
+  serverId: string;
+  /** User ID this OTP belongs to */
+  userId: string;
+  /** Credential ID in Warpgate */
+  credentialId: string;
+  /** Base32-encoded TOTP secret for generating codes */
+  secret: string;
+  /** When this was registered */
+  registeredAt: Date;
+}
+
+/** User details from Warpgate API */
+export interface WarpgateUser {
+  /** Unique user ID */
+  id: string;
+  /** Username */
+  username: string;
+  /** User credential policy requirements */
+  credential_policy?: {
+    http?: string[];
+    ssh?: string[];
+    mysql?: string[];
+  };
+}
+
+/** User's own credential state from profile API */
+export interface WarpgateProfileCredentials {
+  /** Whether user has a password set */
+  password: boolean;
+  /** List of OTP credential IDs */
+  otp: string[];
+  /** List of public key IDs */
+  publicKeys: string[];
+  /** Whether SSO is configured */
+  sso: boolean;
+}
+
+/** Response when enabling OTP via profile API */
+export interface WarpgateOtpEnableResponse {
+  /** The credential ID */
+  id: string;
+  /** The TOTP secret (only returned once on creation) */
+  secret: string;
+  /** Provisioning URI for QR code (otpauth://...) */
+  provisioning_uri?: string;
+}
+
+/** Request to enable OTP - includes the secret being registered */
+export interface WarpgateOtpEnableRequest {
+  /** Base32-encoded TOTP secret */
+  secret: string;
 }

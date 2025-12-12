@@ -353,6 +353,121 @@ describe('WarpgateApiClient', () => {
       expect(connString).toBe('ticket-abc123secret456@warpgate.example.com:2222');
     });
   });
+
+  describe('self-service profile OTP', () => {
+    it('should get profile credentials', async () => {
+      const mockCredentials = {
+        password: true,
+        otp: ['otp-cred-1'],
+        publicKeys: [],
+        sso: false,
+      };
+      mockFetch.mockResolvedValueOnce(createMockResponse(mockCredentials));
+
+      const result = await client.getProfileCredentials();
+
+      expect(mockFetch).toHaveBeenCalledWith(
+        'https://warpgate.example.com/@warpgate/api/profile/credentials',
+        expect.any(Object)
+      );
+      expect(result.success).toBe(true);
+      expect(result.data?.otp).toEqual(['otp-cred-1']);
+    });
+
+    it('should enable profile OTP', async () => {
+      const mockResponse = {
+        id: 'otp-cred-new',
+        secret: 'JBSWY3DPEHPK3PXP',
+      };
+      mockFetch.mockResolvedValueOnce(createMockResponse(mockResponse));
+
+      const result = await client.enableProfileOtp('JBSWY3DPEHPK3PXP');
+
+      expect(mockFetch).toHaveBeenCalledWith(
+        'https://warpgate.example.com/@warpgate/api/profile/credentials/otp',
+        expect.objectContaining({
+          method: 'POST',
+          body: JSON.stringify({ secret: 'JBSWY3DPEHPK3PXP' }),
+        })
+      );
+      expect(result.success).toBe(true);
+      expect(result.data?.id).toBe('otp-cred-new');
+    });
+
+    it('should disable profile OTP', async () => {
+      mockFetch.mockResolvedValueOnce(createMockResponse(null, { status: 204 }));
+
+      const result = await client.disableProfileOtp('otp-cred-1');
+
+      expect(mockFetch).toHaveBeenCalledWith(
+        'https://warpgate.example.com/@warpgate/api/profile/credentials/otp/otp-cred-1',
+        expect.objectContaining({
+          method: 'DELETE',
+        })
+      );
+      expect(result.success).toBe(true);
+    });
+
+    it('should check if profile has OTP enabled', async () => {
+      const mockCredentials = {
+        password: true,
+        otp: ['otp-cred-1'],
+        publicKeys: [],
+        sso: false,
+      };
+      mockFetch.mockResolvedValueOnce(createMockResponse(mockCredentials));
+
+      const hasOtp = await client.hasProfileOtp();
+
+      expect(hasOtp).toBe(true);
+    });
+
+    it('should return false when no OTP configured', async () => {
+      const mockCredentials = {
+        password: true,
+        otp: [],
+        publicKeys: [],
+        sso: false,
+      };
+      mockFetch.mockResolvedValueOnce(createMockResponse(mockCredentials));
+
+      const hasOtp = await client.hasProfileOtp();
+
+      expect(hasOtp).toBe(false);
+    });
+
+    it('should auto-setup OTP', async () => {
+      const mockResponse = {
+        id: 'otp-cred-auto',
+        secret: 'AUTO_GENERATED_SECRET',
+      };
+      mockFetch.mockResolvedValueOnce(createMockResponse(mockResponse));
+
+      const result = await client.autoSetupOtp();
+
+      expect(mockFetch).toHaveBeenCalledWith(
+        'https://warpgate.example.com/@warpgate/api/profile/credentials/otp',
+        expect.objectContaining({
+          method: 'POST',
+        })
+      );
+      expect(result.success).toBe(true);
+      expect(result.data?.credentialId).toBe('otp-cred-auto');
+      // The secret should be a valid Base32 string (generated internally)
+      expect(result.data?.secret).toMatch(/^[A-Z2-7]+$/);
+    });
+
+    it('should handle auto-setup OTP failure', async () => {
+      mockFetch.mockResolvedValueOnce(createMockResponse(
+        { error: 'OTP already enabled' },
+        { status: 400, ok: false }
+      ));
+
+      const result = await client.autoSetupOtp();
+
+      expect(result.success).toBe(false);
+    });
+  });
 });
 
 /**

@@ -18,6 +18,8 @@ export interface WarpgateSSHProfile extends SSHProfile {
     targetName: string;
     targetDescription?: string;
     groupName?: string;
+    /** Pre-computed OTP code for automatic keyboard-interactive auth */
+    otpCode?: string;
   };
 }
 
@@ -189,6 +191,106 @@ export class WarpgateProfileProvider extends ProfileProvider<WarpgateSSHProfile>
     };
 
     return profile;
+  }
+
+  /**
+   * Create a profile with automatic password + OTP authentication
+   * This is the fallback method when ticket creation is not available
+   * The OTP code is stored in warpgate metadata and can be used by
+   * custom keyboard-interactive handlers or injected during connection
+   */
+  async createProfileWithAutoAuth(
+    server: WarpgateServerConfig,
+    target: WarpgateTarget
+  ): Promise<WarpgateSSHProfile> {
+    // Get full credentials including OTP code
+    const authDetails = await this.warpgateService.getFullAuthCredentials(server.id, target.name);
+
+    if (!authDetails) {
+      throw new Error(`Cannot get auth credentials for ${target.name}`);
+    }
+
+    // If ticket auth is available, use that instead
+    if (authDetails.useTicket) {
+      return this.createProfileWithTicket(server, target);
+    }
+
+    const profileId = `warpgate:${server.id}:${target.name}:autoauth`;
+    const groupName = target.group?.name || server.name;
+
+    // Profile with password auth - OTP code stored in warpgate metadata
+    // for use by keyboard-interactive handler
+    const profile: WarpgateSSHProfile = {
+      id: profileId,
+      type: 'ssh',
+      name: target.name,
+      group: `Warpgate/${groupName}`,
+      icon: this.getIconForTarget(target),
+      color: this.getColorForTarget(target),
+      isBuiltin: true,
+      isTemplate: false,
+      options: {
+        host: authDetails.host,
+        port: authDetails.port,
+        user: authDetails.username,
+        // Use password auth - Tabby will handle keyboard-interactive prompts
+        // and use the stored password for password prompts
+        auth: 'password',
+        password: authDetails.password,
+        keepaliveInterval: 30,
+        keepaliveCountMax: 3,
+        readyTimeout: 20000,
+        x11: false,
+        skipBanner: false,
+        jumpHost: '',
+        agentForward: false,
+        socksProxyHost: '',
+        socksProxyPort: 0,
+        httpProxyHost: '',
+        httpProxyPort: 0,
+        scripts: [],
+        forwardedPorts: [],
+        algorithms: {
+          hmac: [],
+          kex: [],
+          cipher: [],
+          serverHostKey: [],
+        },
+      },
+      warpgate: {
+        serverId: server.id,
+        serverName: server.name,
+        targetName: target.name,
+        targetDescription: target.description,
+        groupName: target.group?.name,
+        // Store OTP code for keyboard-interactive handler to use
+        otpCode: authDetails.otpCode,
+      },
+    };
+
+    return profile;
+  }
+
+  /**
+   * Create a one-click profile using the best available authentication method
+   * Priority: 1) Ticket auth, 2) Auto auth with OTP, 3) Password only
+   */
+  async createOneClickProfile(
+    server: WarpgateServerConfig,
+    target: WarpgateTarget
+  ): Promise<WarpgateSSHProfile> {
+    // First, try to get a ticket for true one-click access
+    try {
+      const ticketDetails = await this.warpgateService.getOrCreateTicket(server.id, target.name);
+      if (ticketDetails && ticketDetails.username.startsWith('ticket-')) {
+        return this.createProfileWithTicket(server, target);
+      }
+    } catch {
+      // Ticket creation failed, fall back to auto auth
+    }
+
+    // Fall back to automatic password + OTP authentication
+    return this.createProfileWithAutoAuth(server, target);
   }
 
   /**
@@ -388,6 +490,70 @@ export class WarpgateSFTPProfileProvider extends ProfileProvider<WarpgateSFTPPro
         initialPath: config.defaultSftpPath || '~',
       },
     };
+  }
+
+  /**
+   * Create an SFTP profile with automatic authentication (fallback)
+   * Uses password + OTP for keyboard-interactive auth
+   */
+  async createSftpProfileWithAutoAuth(
+    server: WarpgateServerConfig,
+    target: WarpgateTarget
+  ): Promise<WarpgateSFTPProfile> {
+    const config = this.warpgateService.getConfig();
+    const authDetails = await this.warpgateService.getFullAuthCredentials(server.id, target.name);
+
+    if (!authDetails) {
+      throw new Error(`Cannot get auth credentials for ${target.name}`);
+    }
+
+    // If ticket auth is available, use that
+    if (authDetails.useTicket) {
+      return this.createSftpProfileWithTicket(server, target);
+    }
+
+    return {
+      id: `warpgate-sftp:${server.id}:${target.name}:autoauth`,
+      type: 'sftp',
+      name: `${target.name} (SFTP)`,
+      group: `Warpgate SFTP/${target.group?.name || server.name}`,
+      icon: 'fas fa-folder',
+      isBuiltin: true,
+      isTemplate: false,
+      warpgate: {
+        serverId: server.id,
+        serverName: server.name,
+        targetName: target.name,
+      },
+      options: {
+        host: authDetails.host,
+        port: authDetails.port,
+        user: authDetails.username,
+        password: authDetails.password,
+        initialPath: config.defaultSftpPath || '~',
+      },
+    };
+  }
+
+  /**
+   * Create a one-click SFTP profile using the best available auth method
+   */
+  async createOneClickSftpProfile(
+    server: WarpgateServerConfig,
+    target: WarpgateTarget
+  ): Promise<WarpgateSFTPProfile> {
+    // First, try to get a ticket for true one-click access
+    try {
+      const ticketDetails = await this.warpgateService.getOrCreateTicket(server.id, target.name);
+      if (ticketDetails && ticketDetails.username.startsWith('ticket-')) {
+        return this.createSftpProfileWithTicket(server, target);
+      }
+    } catch {
+      // Ticket creation failed, fall back to auto auth
+    }
+
+    // Fall back to automatic password authentication
+    return this.createSftpProfileWithAutoAuth(server, target);
   }
 
   /**

@@ -48,6 +48,7 @@ import {
 import { WarpgateConfigProvider } from './providers/config.provider';
 import { WarpgateSettingsTabProvider } from './providers/settings-tab.provider';
 import { WarpgateHotkeyProvider } from './providers/hotkey.provider';
+import { WarpgateKeyboardInteractiveHandler } from './providers/warpgate-keyboard-interactive.provider';
 
 /**
  * Warpgate Plugin Module
@@ -71,6 +72,7 @@ import { WarpgateHotkeyProvider } from './providers/hotkey.provider';
     WarpgateService,
     WarpgateProfileProvider,
     WarpgateSFTPProfileProvider,
+    WarpgateKeyboardInteractiveHandler,
 
     // Configuration provider
     { provide: ConfigProvider, useClass: WarpgateConfigProvider, multi: true },
@@ -105,3 +107,5 @@ export * from './models/warpgate.models';
 export * from './api/warpgate.api';
 export * from './services/warpgate.service';
 export * from './services/warpgate-profile.service';
+export * from './providers/warpgate-keyboard-interactive.provider';
+export * from './utils/totp';

@@ -94,12 +94,43 @@ This plugin uses Warpgate's **ticket system** for truly one-click SSH/SFTP conne
 
 This means you only need to enter your Warpgate credentials once when setting up - all subsequent connections are instant!
 
-### Traditional Fallback
+### Traditional Fallback with Automatic OTP
 
-If ticket creation fails (e.g., non-admin users), the plugin falls back to traditional authentication:
+If ticket creation fails (e.g., non-admin users), the plugin falls back to traditional authentication with automatic OTP support:
 
 - Username format: `warpgate_user:target_name`
 - Uses the stored password for authentication
+- **Automatic OTP**: The plugin automatically generates and provides OTP codes during keyboard-interactive authentication
+
+#### Automatic OTP Setup (Recommended)
+
+The easiest way to set up OTP is to let the plugin do it automatically:
+
+1. Go to Settings > Warpgate
+2. Select your server and click **"Auto-Setup OTP"**
+3. The plugin will:
+   - Generate a secure TOTP secret
+   - Register it with your Warpgate account via the self-service API
+   - Store the secret locally for automatic code generation
+4. Done! All SSH connections will now automatically provide OTP codes
+
+**Note:** This uses Warpgate's self-service profile API (`/profile/credentials/otp`) - no admin access required!
+
+#### Manual OTP Setup
+
+If you already have OTP configured in Warpgate and want to use your existing secret:
+
+1. Go to Settings > Warpgate
+2. Edit your server configuration
+3. Enter your **TOTP Secret** (the Base32 key from your authenticator app)
+4. The plugin will now automatically generate OTP codes during SSH authentication
+
+**Finding Your TOTP Secret:**
+- When setting up 2FA in Warpgate, you're shown a QR code
+- The QR code contains a `secret` parameter (Base32 string like `JBSWY3DPEHPK3PXP`)
+- You can also export the secret from authenticator apps like Aegis, andOTP, or Google Authenticator
+
+**Security Note:** The TOTP secret is stored in Tabby's configuration. Make sure your Tabby config is protected.
 
 ### SSH Connection
 
