@@ -25,6 +25,10 @@ interface ServerFormState {
   enabled: boolean;
   isTesting: boolean;
   testResult: { success: boolean; message: string } | null;
+  /** OTP-related state */
+  needsOtp: boolean;
+  otpCode: string;
+  otpSecret: string;
 }
 
 @Component({
@@ -121,6 +125,42 @@ interface ServerFormState {
               <label class="form-check-label" for="enabled">
                 Enable this server
               </label>
+            </div>
+
+            <!-- OTP Section -->
+            <div class="otp-section" *ngIf="form.needsOtp">
+              <div class="alert alert-info">
+                <i class="fas fa-key"></i>
+                This server requires OTP (Two-Factor Authentication).
+                Enter your current OTP code to continue.
+              </div>
+              <div class="form-group">
+                <label>OTP Code</label>
+                <input
+                  type="text"
+                  class="form-control"
+                  [(ngModel)]="form.otpCode"
+                  placeholder="Enter 6-digit OTP code"
+                  maxlength="6"
+                  pattern="[0-9]*"
+                  autocomplete="one-time-code"
+                />
+              </div>
+            </div>
+
+            <!-- OTP Secret for Auto-Login (optional) -->
+            <div class="form-group">
+              <label>OTP Secret (optional)</label>
+              <input
+                type="password"
+                class="form-control"
+                [(ngModel)]="form.otpSecret"
+                placeholder="Base32 TOTP secret for auto-login"
+              />
+              <small class="form-text text-muted">
+                If your server requires OTP, enter your TOTP secret here for automatic code generation.
+                This is the secret key from your authenticator app setup (e.g., JBSWY3DPEHPK3PXP).
+              </small>
             </div>
 
             <!-- Test Result -->
@@ -413,6 +453,9 @@ export class WarpgateSettingsComponent implements OnInit, OnDestroy {
     enabled: true,
     isTesting: false,
     testResult: null,
+    needsOtp: false,
+    otpCode: '',
+    otpSecret: '',
   };
 
   private subscriptions: Subscription[] = [];
@@ -463,6 +506,9 @@ export class WarpgateSettingsComponent implements OnInit, OnDestroy {
       enabled: server.enabled,
       isTesting: false,
       testResult: null,
+      needsOtp: false,
+      otpCode: '',
+      otpSecret: server.otpSecret || '',
     };
   }
 
@@ -482,6 +528,9 @@ export class WarpgateSettingsComponent implements OnInit, OnDestroy {
       enabled: true,
       isTesting: false,
       testResult: null,
+      needsOtp: false,
+      otpCode: '',
+      otpSecret: '',
     };
   }
 
@@ -501,19 +550,67 @@ export class WarpgateSettingsComponent implements OnInit, OnDestroy {
     this.form.testResult = null;
 
     try {
-      const result = await this.warpgateService.testServerConnection(
+      // If OTP is needed and we have a code, submit it
+      if (this.form.needsOtp && this.form.otpCode) {
+        const result = await this.warpgateService.testServerConnectionWithOtp(
+          this.form.url,
+          this.form.otpCode,
+          this.form.trustSelfSigned
+        );
+
+        if (result.success) {
+          this.form.needsOtp = false;
+          this.form.otpCode = '';
+          this.form.testResult = {
+            success: true,
+            message: 'Connection successful!',
+          };
+        } else {
+          this.form.testResult = {
+            success: false,
+            message: `OTP verification failed: ${result.error}`,
+          };
+        }
+        return;
+      }
+
+      // Generate OTP from secret if available
+      let otpCode: string | undefined;
+      if (this.form.otpSecret) {
+        try {
+          const { generateTOTP } = await import('../utils/totp');
+          otpCode = await generateTOTP(this.form.otpSecret);
+        } catch {
+          // Ignore OTP generation errors, will prompt manually
+        }
+      }
+
+      const result = await this.warpgateService.testServerConnectionFull(
         this.form.url,
         this.form.username,
         this.form.password,
-        this.form.trustSelfSigned
+        this.form.trustSelfSigned,
+        otpCode
       );
 
-      this.form.testResult = {
-        success: result.success,
-        message: result.success
-          ? 'Connection successful!'
-          : `Connection failed: ${result.error}`,
-      };
+      if (result.needsOtp) {
+        this.form.needsOtp = true;
+        this.form.testResult = {
+          success: false,
+          message: 'Server requires OTP. Please enter your 6-digit code above.',
+        };
+      } else if (result.success) {
+        this.form.needsOtp = false;
+        this.form.testResult = {
+          success: true,
+          message: 'Connection successful!',
+        };
+      } else {
+        this.form.testResult = {
+          success: false,
+          message: `Connection failed: ${result.error}`,
+        };
+      }
     } catch (error) {
       this.form.testResult = {
         success: false,
@@ -527,19 +624,20 @@ export class WarpgateSettingsComponent implements OnInit, OnDestroy {
   async saveServer(): Promise<void> {
     if (!this.isFormValid()) return;
 
-    const serverData = {
+    const serverData: Partial<WarpgateServerConfig> = {
       name: this.form.name.trim(),
       url: this.form.url.trim(),
       username: this.form.username.trim(),
       password: this.form.password,
       trustSelfSigned: this.form.trustSelfSigned,
       enabled: this.form.enabled,
+      otpSecret: this.form.otpSecret.trim() || undefined,
     };
 
     if (this.form.editingServerId) {
       await this.warpgateService.updateServer(this.form.editingServerId, serverData);
     } else {
-      await this.warpgateService.addServer(serverData);
+      await this.warpgateService.addServer(serverData as Omit<WarpgateServerConfig, 'id'>);
     }
 
     this.loadServers();

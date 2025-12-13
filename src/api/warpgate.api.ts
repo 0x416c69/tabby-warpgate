@@ -123,11 +123,29 @@ export class WarpgateApiClient {
 
       if (!response.ok) {
         const errorText = await response.text();
+        let errorMessage = `HTTP ${response.status}`;
+        if (response.statusText) {
+          errorMessage += `: ${response.statusText}`;
+        }
+        // Try to parse error details from response body
+        if (errorText) {
+          try {
+            const errorJson = JSON.parse(errorText);
+            if (errorJson.error || errorJson.message) {
+              errorMessage = errorJson.error || errorJson.message;
+            }
+          } catch {
+            // Not JSON, use raw text if short enough
+            if (errorText.length < 200) {
+              errorMessage += ` - ${errorText}`;
+            }
+          }
+        }
         return {
           success: false,
           error: {
             status: response.status,
-            message: `API error: ${response.statusText}`,
+            message: errorMessage,
             details: errorText,
           },
         };
@@ -147,12 +165,27 @@ export class WarpgateApiClient {
       const data = JSON.parse(text) as T;
       return { success: true, data };
     } catch (error) {
-      const errorMessage = error instanceof Error ? error.message : 'Unknown error';
+      let errorMessage = 'Unknown error';
+      if (error instanceof Error) {
+        errorMessage = error.message;
+        // Provide more helpful messages for common errors
+        if (errorMessage.includes('ECONNREFUSED')) {
+          errorMessage = 'Connection refused - server may be down or URL is incorrect';
+        } else if (errorMessage.includes('ENOTFOUND') || errorMessage.includes('getaddrinfo')) {
+          errorMessage = 'Server not found - check the URL';
+        } else if (errorMessage.includes('ETIMEDOUT') || errorMessage.includes('ESOCKETTIMEDOUT')) {
+          errorMessage = 'Connection timed out - server may be unreachable';
+        } else if (errorMessage.includes('CERT') || errorMessage.includes('certificate')) {
+          errorMessage = 'Certificate error - try enabling "Trust self-signed certificates"';
+        } else if (errorMessage.includes('ECONNRESET')) {
+          errorMessage = 'Connection reset - server closed the connection';
+        }
+      }
       return {
         success: false,
         error: {
           status: 0,
-          message: `Request failed: ${errorMessage}`,
+          message: errorMessage,
         },
       };
     }
@@ -163,12 +196,22 @@ export class WarpgateApiClient {
    * This method can be overridden in tests or for platform-specific implementations
    */
   protected async performFetch(url: string, options: RequestInit): Promise<Response> {
-    // Check if running in Node.js environment (Tabby Desktop)
-    if (typeof window === 'undefined' || !window.fetch) {
-      return this.nodeFetch(url, options);
+    // Always use Node.js fetch in Tabby Desktop to properly handle cookies
+    // Browser/Electron fetch doesn't expose Set-Cookie headers
+    try {
+      // Check if we can use Node.js https module
+      // eslint-disable-next-line @typescript-eslint/no-require-imports
+      const https = require('https');
+      if (https) {
+        console.log('[Warpgate] Using Node.js fetch');
+        return this.nodeFetch(url, options);
+      }
+    } catch {
+      // Not in Node.js environment
     }
 
-    // Browser/Tabby Web environment
+    // Fallback to browser fetch (won't work properly for cookies)
+    console.log('[Warpgate] Using browser fetch (cookies may not work)');
     return fetch(url, options);
   }
 
@@ -197,12 +240,27 @@ export class WarpgateApiClient {
         rejectUnauthorized: !this.trustSelfSigned,
       };
 
+      console.log('[Warpgate] HTTP Request:', {
+        method: requestOptions.method,
+        url: `${urlObj.protocol}//${urlObj.hostname}:${requestOptions.port}${requestOptions.path}`,
+        hasCookie: !!(options.headers as Record<string, string>)?.['Cookie'],
+      });
+
       const req = transport.request(requestOptions, (res: NodeResponse) => {
         const chunks: Buffer[] = [];
 
         res.on('data', (chunk: Buffer) => chunks.push(chunk));
         res.on('end', () => {
           const body = Buffer.concat(chunks).toString('utf-8');
+
+          console.log('[Warpgate] HTTP Response:', {
+            status: res.statusCode,
+            statusMessage: res.statusMessage,
+            hasSetCookie: !!res.headers['set-cookie'],
+            setCookieRaw: res.headers['set-cookie'],
+            bodyLength: body.length,
+            bodyPreview: body.substring(0, 300),
+          });
 
           // Create a Response-like object
           const responseHeaders = new Map<string, string>();
@@ -227,7 +285,9 @@ export class WarpgateApiClient {
         });
       });
 
-      req.on('error', reject);
+      req.on('error', (err: Error) => {
+        reject(new Error(`Network error: ${err.message}`));
+      });
 
       if (options.body) {
         req.write(options.body);
@@ -241,42 +301,192 @@ export class WarpgateApiClient {
    * Parse Set-Cookie header to extract session cookie
    */
   private parseSetCookie(setCookie: string): string {
+    console.log('[Warpgate] Parsing Set-Cookie:', setCookie);
+
     // Extract the warpgate session cookie
+    // The setCookie string might be comma-separated (multiple cookies) or just one
     const cookies = setCookie.split(',').map(c => c.trim());
     for (const cookie of cookies) {
       if (cookie.startsWith('warpgate=') || cookie.includes('warpgate=')) {
         const match = cookie.match(/warpgate=([^;]+)/);
         if (match) {
-          return `warpgate=${match[1]}`;
+          const result = `warpgate=${match[1]}`;
+          console.log('[Warpgate] Extracted session cookie:', result);
+          return result;
         }
       }
     }
-    return setCookie.split(';')[0];
+
+    // Fallback: take the first cookie
+    const fallback = setCookie.split(';')[0];
+    console.log('[Warpgate] Using fallback cookie:', fallback);
+    return fallback;
   }
 
   /**
    * Authenticate with Warpgate server
+   * Warpgate uses HTTP status codes to indicate auth state:
+   * - 401 with {"state":"OtpNeeded"} = password OK, need OTP
+   * - 401 with other = bad credentials
+   * - 200 = fully authenticated
    */
   async login(credentials: WarpgateLoginRequest): Promise<ApiResponse<WarpgateLoginResponse>> {
-    const response = await this.request<WarpgateAuthState>('/auth/login', {
+    console.log('[Warpgate] Starting login flow for:', credentials.username);
+
+    // Submit credentials - Warpgate returns 401 with state in body
+    console.log('[Warpgate] Submitting credentials...');
+    const response = await this.requestWithAuthState<WarpgateAuthState>('/auth/login', {
       method: 'POST',
       body: credentials,
     });
 
-    if (response.success) {
-      return {
-        success: true,
-        data: {
+    console.log('[Warpgate] Login response:', {
+      success: response.success,
+      hasData: !!response.data,
+      authState: response.data,
+      error: response.error?.message,
+    });
+
+    return response;
+  }
+
+  /**
+   * Special request handler for Warpgate auth endpoints
+   * Warpgate returns auth state in 401 response bodies
+   */
+  private async requestWithAuthState<T>(
+    endpoint: string,
+    options: RequestOptions = { method: 'GET' }
+  ): Promise<ApiResponse<WarpgateLoginResponse>> {
+    const url = `${this.baseUrl}/@warpgate/api${endpoint}`;
+
+    const headers: Record<string, string> = {
+      'Content-Type': 'application/json',
+      Accept: 'application/json',
+      ...options.headers,
+    };
+
+    if (this.sessionCookie) {
+      headers['Cookie'] = this.sessionCookie;
+    }
+
+    const fetchOptions: RequestInit = {
+      method: options.method,
+      headers,
+      credentials: options.credentials || 'include',
+    };
+
+    if (options.body && options.method !== 'GET') {
+      fetchOptions.body = JSON.stringify(options.body);
+    }
+
+    try {
+      const response = await this.performFetch(url, fetchOptions);
+
+      // Extract and store cookies from response
+      const setCookie = response.headers.get('set-cookie');
+      if (setCookie) {
+        this.sessionCookie = this.parseSetCookie(setCookie);
+        console.log('[Warpgate] Session cookie set');
+      }
+
+      const text = await response.text();
+      console.log('[Warpgate] Response:', response.status, text);
+
+      // Parse the response body
+      let stateData: any = null;
+      if (text) {
+        try {
+          stateData = JSON.parse(text);
+        } catch {
+          // Not JSON
+        }
+      }
+
+      // 200 = fully authenticated
+      if (response.ok) {
+        return {
           success: true,
-          state: response.data,
+          data: {
+            success: true,
+            state: {
+              protocol: 'http',
+              address: '',
+              started: true,
+              auth: { state: 'Accepted' },
+            },
+          },
+        };
+      }
+
+      // 401 with state = auth in progress
+      if (response.status === 401 && stateData?.state) {
+        const authState = stateData.state;
+        console.log('[Warpgate] Auth state from 401:', authState);
+        console.log('[Warpgate] Current session cookie:', this.sessionCookie);
+
+        // NotStarted means session was lost - treat as error
+        if (authState === 'NotStarted') {
+          return {
+            success: false,
+            error: {
+              status: 401,
+              message: 'Session expired. Please try again.',
+              details: 'Authentication session was lost',
+            },
+          };
+        }
+
+        // Map Warpgate states to our internal format
+        let internalState: 'NotStarted' | 'Progress' | 'Need' | 'Accepted' | 'Rejected' = 'Progress';
+        let methodsRemaining: string[] = [];
+
+        if (authState === 'OtpNeeded') {
+          internalState = 'Need';
+          methodsRemaining = ['Otp'];
+        } else if (authState === 'PasswordNeeded') {
+          internalState = 'Need';
+          methodsRemaining = ['Password'];
+        } else if (authState === 'Failed' || authState === 'Rejected') {
+          internalState = 'Rejected';
+        }
+
+        return {
+          success: true,
+          data: {
+            success: true,
+            state: {
+              protocol: 'http',
+              address: '',
+              started: true,
+              auth: {
+                state: internalState,
+                methods_remaining: methodsRemaining,
+              },
+            },
+          },
+        };
+      }
+
+      // Other 401 = invalid credentials
+      return {
+        success: false,
+        error: {
+          status: response.status,
+          message: stateData?.message || stateData?.error || 'Authentication failed',
+          details: text,
+        },
+      };
+    } catch (error) {
+      const errorMessage = error instanceof Error ? error.message : 'Unknown error';
+      return {
+        success: false,
+        error: {
+          status: 0,
+          message: errorMessage,
         },
       };
     }
-
-    return {
-      success: false,
-      error: response.error,
-    };
   }
 
   /**
@@ -366,12 +576,23 @@ export class WarpgateApiClient {
 
   /**
    * Submit OTP for two-factor authentication
+   * Uses requestWithAuthState to properly handle Warpgate's 401-based auth flow
    */
-  async submitOtp(otp: string): Promise<ApiResponse<WarpgateAuthState>> {
-    return this.request<WarpgateAuthState>('/auth/otp', {
+  async submitOtp(otp: string): Promise<ApiResponse<WarpgateLoginResponse>> {
+    console.log('[Warpgate] Submitting OTP code...');
+    const response = await this.requestWithAuthState<WarpgateAuthState>('/auth/otp', {
       method: 'POST',
       body: { otp },
     });
+
+    console.log('[Warpgate] OTP response:', {
+      success: response.success,
+      hasData: !!response.data,
+      authState: response.data?.state?.auth?.state,
+      error: response.error?.message,
+    });
+
+    return response;
   }
 
   /**

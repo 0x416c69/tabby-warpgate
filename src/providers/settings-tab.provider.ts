@@ -14,9 +14,13 @@ import { WarpgateSettingsComponent } from '../components/warpgate-settings.compo
 export class WarpgateSettingsTabProvider extends SettingsTabProvider {
   id = 'warpgate';
   title = 'Warpgate';
-  icon = 'fas fa-door-open';
+  icon = 'globe';
   component = WarpgateSettingsComponent;
 
   /** Priority for ordering in settings tabs */
   weight = 20;
+
+  getComponentType(): any {
+    return this.component;
+  }
 }

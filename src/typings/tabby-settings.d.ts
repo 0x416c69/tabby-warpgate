@@ -9,9 +9,14 @@ declare module 'tabby-settings' {
     id: string;
     title: string;
     icon: string;
-    component: Type<any>;
+    component?: Type<any>;
     weight?: number;
+    prioritized?: boolean;
+
+    getComponentType?(): Type<any> | null;
   }
 
-  export class TabbySettingsModule {}
+  // The module is exported as default, not as a named export
+  const TabbySettingsModule: any;
+  export default TabbySettingsModule;
 }

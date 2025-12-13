@@ -3,9 +3,10 @@
  * Main service for managing Warpgate connections, authentication, and targets
  */
 
-import { Injectable, Inject, Optional } from '@angular/core';
+import { Injectable, Inject, Optional, Injector } from '@angular/core';
 import { BehaviorSubject, Observable, interval, Subscription } from 'rxjs';
 import { ConfigService, NotificationsService, PlatformService } from 'tabby-core';
+import { NgbModal } from '@ng-bootstrap/ng-bootstrap';
 
 import { WarpgateApiClient } from '../api/warpgate.api';
 import {
@@ -84,7 +85,8 @@ export class WarpgateService {
   constructor(
     @Inject(ConfigService) private config: ConfigService,
     @Optional() @Inject(NotificationsService) private notifications: NotificationsService | null,
-    @Optional() @Inject(PlatformService) private platform: PlatformService | null
+    @Optional() @Inject(PlatformService) private platform: PlatformService | null,
+    private injector: Injector
   ) {
     this.initialize();
   }
@@ -117,13 +119,62 @@ export class WarpgateService {
 
   /**
    * Save plugin configuration
+   * Uses Tabby's config pattern - modify store properties directly and call save()
    */
   saveConfig(pluginConfig: Partial<WarpgatePluginConfig>): void {
-    this.config.store.warpgate = {
-      ...this.getConfig(),
-      ...pluginConfig,
-    };
-    this.config.save();
+    try {
+      // Tabby's store is a proxy - we need to work with its existing structure
+      // First check if warpgate exists in store
+      if (!this.config.store.warpgate) {
+        // This shouldn't happen if ConfigProvider is set up correctly
+        console.error('[Warpgate] Config store.warpgate not initialized!');
+        return;
+      }
+
+      const warpgateConfig = this.config.store.warpgate;
+      console.log('[Warpgate] Saving config, current servers:', warpgateConfig.servers?.length ?? 0);
+
+      // Update individual properties on the existing object
+      // For arrays, we need to modify in place or replace carefully
+      if (pluginConfig.servers !== undefined) {
+        // Clear and repopulate the array to trigger proxy updates
+        warpgateConfig.servers.length = 0;
+        pluginConfig.servers.forEach((s: WarpgateServerConfig) => warpgateConfig.servers.push(s));
+      }
+      if (pluginConfig.autoRefreshInterval !== undefined) {
+        warpgateConfig.autoRefreshInterval = pluginConfig.autoRefreshInterval;
+      }
+      if (pluginConfig.showOfflineServers !== undefined) {
+        warpgateConfig.showOfflineServers = pluginConfig.showOfflineServers;
+      }
+      if (pluginConfig.groupByServer !== undefined) {
+        warpgateConfig.groupByServer = pluginConfig.groupByServer;
+      }
+      if (pluginConfig.sortBy !== undefined) {
+        warpgateConfig.sortBy = pluginConfig.sortBy;
+      }
+      if (pluginConfig.defaultSftpPath !== undefined) {
+        warpgateConfig.defaultSftpPath = pluginConfig.defaultSftpPath;
+      }
+
+      console.log('[Warpgate] Config updated, servers now:', warpgateConfig.servers?.length ?? 0);
+      this.config.save();
+      console.log('[Warpgate] Config saved');
+    } catch (error) {
+      console.error('[Warpgate] Failed to save config:', error);
+      // Fallback: try direct property access on store
+      try {
+        const store = this.config.store as Record<string, unknown>;
+        if (!store['warpgate']) {
+          store['warpgate'] = { ...DEFAULT_WARPGATE_CONFIG };
+        }
+        Object.assign(store['warpgate'] as object, pluginConfig);
+        this.config.save();
+        console.log('[Warpgate] Config saved via fallback');
+      } catch (fallbackError) {
+        console.error('[Warpgate] Fallback save also failed:', fallbackError);
+      }
+    }
   }
 
   /**
@@ -149,63 +200,106 @@ export class WarpgateService {
       id: this.generateId(),
     };
 
-    const servers = this.getServers();
-    servers.push(newServer);
-    this.saveConfig({ servers });
+    try {
+      // Work directly with the config proxy
+      if (!this.config.store.warpgate?.servers) {
+        throw new Error('Config store not initialized');
+      }
 
-    // Create client and connect if enabled
-    if (newServer.enabled) {
-      this.createClient(newServer);
-      await this.connect(newServer.id);
+      // Push directly to the proxy array
+      this.config.store.warpgate.servers.push(newServer);
+      console.log('[Warpgate] Added server, total servers:', this.config.store.warpgate.servers.length);
+      this.config.save();
+
+      // Create client and connect if enabled
+      if (newServer.enabled) {
+        this.createClient(newServer);
+        await this.connect(newServer.id);
+      }
+
+      this.emitEvent({ type: 'server-added', serverId: newServer.id, data: newServer });
+      return newServer;
+    } catch (error) {
+      console.error('[Warpgate] Failed to add server:', error);
+      throw error;
     }
-
-    this.emitEvent({ type: 'server-added', serverId: newServer.id, data: newServer });
-    return newServer;
   }
 
   /**
    * Update an existing server
    */
   async updateServer(serverId: string, updates: Partial<WarpgateServerConfig>): Promise<void> {
-    const servers = this.getServers();
-    const index = servers.findIndex(s => s.id === serverId);
-
-    if (index === -1) {
-      throw new Error(`Server ${serverId} not found`);
-    }
-
-    const updatedServer = { ...servers[index], ...updates };
-    servers[index] = updatedServer;
-    this.saveConfig({ servers });
-
-    // Recreate client if URL or credentials changed
-    if (updates.url || updates.username || updates.password || updates.trustSelfSigned !== undefined) {
-      this.clients.delete(serverId);
-      this.sessions.delete(serverId);
-
-      if (updatedServer.enabled) {
-        this.createClient(updatedServer);
-        await this.connect(serverId);
+    try {
+      // Work directly with the config proxy to avoid array copy issues
+      if (!this.config.store.warpgate?.servers) {
+        throw new Error('Config store not initialized');
       }
-    }
 
-    this.emitEvent({ type: 'server-updated', serverId, data: updatedServer });
+      const servers = this.config.store.warpgate.servers;
+      const index = servers.findIndex((s: WarpgateServerConfig) => s.id === serverId);
+
+      if (index === -1) {
+        throw new Error(`Server ${serverId} not found`);
+      }
+
+      // Update the server in place on the proxy array
+      const currentServer = servers[index];
+      const updatedServer = { ...currentServer, ...updates };
+
+      // Replace in the proxy array (this triggers reactivity)
+      servers[index] = updatedServer;
+
+      console.log('[Warpgate] Updated server in config, total servers:', servers.length);
+      this.config.save();
+
+      // Recreate client if URL or credentials changed
+      if (updates.url || updates.username || updates.password || updates.trustSelfSigned !== undefined) {
+        this.clients.delete(serverId);
+        this.sessions.delete(serverId);
+
+        if (updatedServer.enabled) {
+          this.createClient(updatedServer);
+          await this.connect(serverId);
+        }
+      }
+
+      this.emitEvent({ type: 'server-updated', serverId, data: updatedServer });
+    } catch (error) {
+      console.error('[Warpgate] Failed to update server:', error);
+      throw error;
+    }
   }
 
   /**
    * Remove a server
    */
   removeServer(serverId: string): void {
-    const servers = this.getServers().filter(s => s.id !== serverId);
-    this.saveConfig({ servers });
+    try {
+      // Work directly with the config proxy
+      if (!this.config.store.warpgate?.servers) {
+        throw new Error('Config store not initialized');
+      }
 
-    // Clean up client and session
-    this.clients.delete(serverId);
-    this.sessions.delete(serverId);
-    this.connectionStatus.delete(serverId);
+      const servers = this.config.store.warpgate.servers;
+      const index = servers.findIndex((s: WarpgateServerConfig) => s.id === serverId);
 
-    this.updateStatusSubject();
-    this.emitEvent({ type: 'server-removed', serverId });
+      if (index !== -1) {
+        // Remove from proxy array using splice
+        servers.splice(index, 1);
+        console.log('[Warpgate] Removed server, total servers:', servers.length);
+        this.config.save();
+      }
+
+      // Clean up client and session
+      this.clients.delete(serverId);
+      this.sessions.delete(serverId);
+      this.connectionStatus.delete(serverId);
+
+      this.updateStatusSubject();
+      this.emitEvent({ type: 'server-removed', serverId });
+    } catch (error) {
+      console.error('[Warpgate] Failed to remove server:', error);
+    }
   }
 
   /**
@@ -265,8 +359,46 @@ export class WarpgateService {
         password: server.password,
       });
 
-      if (loginResult.success) {
-        // Store session
+      if (loginResult.success && loginResult.data?.state) {
+        const authState = loginResult.data.state;
+
+        // Check if OTP is required
+        if (authState.auth?.state === 'Need' &&
+            authState.auth?.methods_remaining?.includes('Otp')) {
+
+          // Try to generate OTP from stored secret
+          let otpCode: string | null = null;
+          if (server.otpSecret && isValidTOTPSecret(server.otpSecret)) {
+            try {
+              otpCode = await generateTOTP(server.otpSecret);
+              console.log('[Warpgate] Generated OTP from stored secret');
+            } catch (otpError) {
+              console.error('[Warpgate] Failed to generate OTP:', otpError);
+            }
+          }
+
+          if (!otpCode) {
+            // No OTP secret configured - prompt user
+            otpCode = await this.promptForOtp(server.name);
+          }
+
+          if (!otpCode) {
+            this.updateConnectionStatus(serverId, false, 'OTP required but not provided');
+            this.showNotification('error', `OTP required for ${server.name}`);
+            return false;
+          }
+
+          // Submit OTP
+          const otpResult = await client.submitOtp(otpCode);
+          if (!otpResult.success || otpResult.data?.state?.auth?.state !== 'Accepted') {
+            const otpError = otpResult.error?.message || 'OTP verification failed';
+            this.updateConnectionStatus(serverId, false, otpError);
+            this.showNotification('error', `OTP failed for ${server.name}: ${otpError}`);
+            return false;
+          }
+        }
+
+        // Authentication complete - store session
         const session: WarpgateSession = {
           serverId,
           cookie: client.getSessionCookie() || '',
@@ -873,6 +1005,36 @@ export class WarpgateService {
   }
 
   /**
+   * Prompt user for OTP code
+   * Uses NgbModal to show a proper Angular modal dialog
+   */
+  private async promptForOtp(serverName: string): Promise<string | null> {
+    try {
+      // Dynamically import the modal component to avoid circular dependencies
+      const { WarpgateOtpModalComponent } = await import('../components/warpgate-otp-modal.component');
+
+      // Get NgbModal service from injector
+      const modalService = this.injector.get(NgbModal);
+
+      const modalRef = modalService.open(WarpgateOtpModalComponent, {
+        centered: true,
+        keyboard: true,
+        backdrop: 'static',
+      });
+
+      modalRef.componentInstance.serverName = serverName;
+
+      // Wait for modal to close and return the result
+      const result = await modalRef.result;
+      return result?.trim() || null;
+    } catch (error) {
+      console.error('[Warpgate] Failed to show OTP modal:', error);
+      this.showNotification('error', 'Failed to show OTP input dialog');
+      return null;
+    }
+  }
+
+  /**
    * Test connection to a server without saving
    */
   async testServerConnection(
@@ -881,28 +1043,125 @@ export class WarpgateService {
     password: string,
     trustSelfSigned = false
   ): Promise<{ success: boolean; error?: string }> {
-    const client = new WarpgateApiClient(url, trustSelfSigned);
+    const result = await this.testServerConnectionFull(url, username, password, trustSelfSigned);
+    return { success: result.success, error: result.error };
+  }
+
+  /**
+   * Test connection to a server with full OTP support
+   * Returns needsOtp: true if server requires OTP authentication
+   */
+  async testServerConnectionFull(
+    url: string,
+    username: string,
+    password: string,
+    trustSelfSigned = false,
+    otpCode?: string
+  ): Promise<{ success: boolean; needsOtp?: boolean; error?: string }> {
+    // Store client temporarily for OTP follow-up
+    const clientKey = `test:${url}`;
+    let client = this.testClients.get(clientKey);
+
+    if (!client) {
+      client = new WarpgateApiClient(url, trustSelfSigned);
+      this.testClients.set(clientKey, client);
+    }
 
     try {
       const result = await client.login({ username, password });
 
-      if (result.success) {
-        // Logout after test
-        await client.logout();
-        return { success: true };
+      if (result.success && result.data?.state) {
+        const authState = result.data.state;
+
+        // Check if OTP is required
+        if (authState.auth?.state === 'Need' &&
+            authState.auth?.methods_remaining?.includes('Otp')) {
+
+          // If we have an OTP code, submit it
+          if (otpCode) {
+            const otpResult = await client.submitOtp(otpCode);
+            if (otpResult.success && otpResult.data?.state) {
+              // Check final auth state
+              const finalAuthState = otpResult.data.state.auth;
+              if (finalAuthState?.state === 'Accepted') {
+                await client.logout();
+                this.testClients.delete(clientKey);
+                return { success: true };
+              }
+            }
+            return { success: false, error: otpResult.error?.message || 'OTP verification failed' };
+          }
+
+          // OTP required but not provided
+          return { success: false, needsOtp: true };
+        }
+
+        // Check if authentication was accepted
+        if (authState.auth?.state === 'Accepted') {
+          await client.logout();
+          this.testClients.delete(clientKey);
+          return { success: true };
+        }
+
+        // Auth in progress but not complete
+        return { success: false, error: 'Authentication incomplete' };
       } else {
+        this.testClients.delete(clientKey);
         return {
           success: false,
           error: result.error?.message || 'Authentication failed',
         };
       }
     } catch (error) {
+      this.testClients.delete(clientKey);
       return {
         success: false,
         error: error instanceof Error ? error.message : 'Connection failed',
       };
     }
   }
+
+  /**
+   * Submit OTP for a test connection that's waiting for OTP
+   */
+  async testServerConnectionWithOtp(
+    url: string,
+    otpCode: string,
+    trustSelfSigned = false
+  ): Promise<{ success: boolean; error?: string }> {
+    const clientKey = `test:${url}`;
+    const client = this.testClients.get(clientKey);
+
+    if (!client) {
+      return { success: false, error: 'No pending authentication. Please test connection again.' };
+    }
+
+    try {
+      const otpResult = await client.submitOtp(otpCode);
+
+      if (otpResult.success && otpResult.data?.state) {
+        const authState = otpResult.data.state.auth;
+        if (authState?.state === 'Accepted') {
+          await client.logout();
+          this.testClients.delete(clientKey);
+          return { success: true };
+        }
+        // Still needs more auth
+        return { success: false, error: 'Additional authentication required' };
+      }
+
+      return { success: false, error: otpResult.error?.message || 'OTP verification failed' };
+    } catch (error) {
+      this.testClients.delete(clientKey);
+      return {
+        success: false,
+        error: error instanceof Error ? error.message : 'OTP submission failed',
+      };
+    }
+  }
+
+  /** Temporary clients for test connections (to maintain session for OTP) */
+  private testClients: Map<string, WarpgateApiClient> = new Map();
 
   /**
    * Clean up on destroy

@@ -120,5 +120,7 @@ declare module 'tabby-core' {
 
   export class SplitTabComponent {}
 
-  export class TabbyCoreModule {}
+  // The module is exported as default, not as a named export
+  const TabbyCoreModule: any;
+  export default TabbyCoreModule;
 }

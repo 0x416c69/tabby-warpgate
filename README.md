@@ -16,7 +16,7 @@ A comprehensive Warpgate SSH gateway integration for [Tabby Terminal](https://ta
 
 ## Installation
 
-### From Plugin Manager
+### From Plugin Manager (Recommended)
 
 1. Open Tabby
 2. Go to Settings > Plugins
@@ -25,13 +25,50 @@ A comprehensive Warpgate SSH gateway integration for [Tabby Terminal](https://ta
 
 ### Manual Installation
 
-1. Clone this repository
-2. Run `npm install`
-3. Run `npm run build`
-4. Copy the `dist` folder to your Tabby plugins directory:
-   - **Windows**: `%APPDATA%\tabby\plugins\tabby-warpgate`
-   - **macOS**: `~/Library/Application Support/tabby/plugins/tabby-warpgate`
-   - **Linux**: `~/.config/tabby/plugins/tabby-warpgate`
+Tabby's plugins directory works as a separate npm project. Plugins must be installed via npm, not just copied.
+
+1. Clone and build the plugin:
+   ```bash
+   git clone https://github.com/0x416c69/tabby-warpgate.git
+   cd tabby-warpgate
+   npm install
+   npm run build
+   ```
+
+2. Navigate to Tabby's plugins directory:
+   - **Windows**: `%APPDATA%\tabby\plugins`
+   - **macOS**: `~/Library/Application Support/tabby/plugins`
+   - **Linux**: `~/.config/tabby/plugins`
+
+   Or open it from Tabby: Settings > Plugins > "Open Plugins Directory"
+
+3. Install the plugin using npm:
+   ```bash
+   cd /path/to/tabby/plugins
+   npm install /path/to/tabby-warpgate
+   ```
+
+   For example on Windows:
+   ```bash
+   cd %APPDATA%\tabby\plugins
+   npm install "C:\path\to\tabby-warpgate"
+   ```
+
+4. Restart Tabby
+
+### Development Installation (npm link)
+
+For active development where you want changes to reflect without reinstalling:
+
+```bash
+# In your plugin directory
+cd /path/to/tabby-warpgate
+npm link
+
+# In Tabby's plugins directory
+cd /path/to/tabby/plugins
+npm link tabby-warpgate
+```
 
 ## Configuration
 
@@ -188,14 +225,20 @@ tabby-warpgate/
 
 ### Testing Your Plugin
 
-Run Tabby with your plugin in development:
+Run Tabby with your plugin in development using the `TABBY_PLUGINS` environment variable. Note that the path should be the **parent directory** containing your plugin folder:
 
 ```bash
-# Linux/macOS
-TABBY_PLUGINS=$(pwd) tabby --debug
+# Linux/macOS (from inside tabby-warpgate directory)
+TABBY_PLUGINS=$(dirname $(pwd)) tabby --debug
 
-# Windows PowerShell
-$env:TABBY_PLUGINS = Get-Location; tabby --debug
+# Or explicitly
+TABBY_PLUGINS=/path/to/parent/directory tabby --debug
+
+# Windows PowerShell (from inside tabby-warpgate directory)
+$env:TABBY_PLUGINS = (Get-Item .).Parent.FullName; tabby --debug
+
+# Or explicitly
+$env:TABBY_PLUGINS = "C:\path\to\parent\directory"; tabby --debug
 ```
 
 ## Warpgate Configuration
@@ -243,9 +286,11 @@ targets:
 
 ### Plugin Not Loading
 
-1. Check Tabby's plugin directory for the correct structure
-2. Look for errors in Tabby's developer console (Ctrl+Shift+I)
-3. Ensure all peer dependencies are met
+1. **Ensure the plugin is installed via npm**: Simply copying the folder won't work. The plugin must be installed using `npm install /path/to/tabby-warpgate` from within Tabby's plugins directory
+2. **Verify it appears in package.json**: Check `%APPDATA%\tabby\plugins\package.json` - your plugin should be listed in dependencies
+3. **Check node_modules**: The plugin should exist in `%APPDATA%\tabby\plugins\node_modules\tabby-warpgate`
+4. **Look for errors in Tabby's developer console**: Press Ctrl+Shift+I to open DevTools
+5. **Ensure the plugin is built**: The `dist/index.js` file must exist
 
 ### SSH Connection Fails
 

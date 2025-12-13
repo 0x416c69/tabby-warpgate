@@ -20,14 +20,14 @@
 import { NgModule } from '@angular/core';
 import { CommonModule } from '@angular/common';
 import { FormsModule } from '@angular/forms';
-import {
-  TabbyCoreModule,
+import { NgbModalModule } from '@ng-bootstrap/ng-bootstrap';
+import TabbyCoreModule, {
   ConfigProvider,
   ToolbarButtonProvider,
   HotkeyProvider,
   ProfileProvider,
 } from 'tabby-core';
-import { SettingsTabProvider, TabbySettingsModule } from 'tabby-settings';
+import TabbySettingsModule, { SettingsTabProvider } from 'tabby-settings';
 
 // Services
 import { WarpgateService } from './services/warpgate.service';
@@ -43,6 +43,7 @@ import {
   WarpgateToolbarButtonProvider,
   WarpgateDockComponent,
 } from './components/warpgate-toolbar.component';
+import { WarpgateOtpModalComponent } from './components/warpgate-otp-modal.component';
 
 // Providers
 import { WarpgateConfigProvider } from './providers/config.provider';
@@ -59,6 +60,7 @@ import { WarpgateKeyboardInteractiveHandler } from './providers/warpgate-keyboar
   imports: [
     CommonModule,
     FormsModule,
+    NgbModalModule,
     TabbyCoreModule,
     TabbySettingsModule,
   ],
@@ -66,6 +68,7 @@ import { WarpgateKeyboardInteractiveHandler } from './providers/warpgate-keyboar
     WarpgateSettingsComponent,
     WarpgateHostsComponent,
     WarpgateDockComponent,
+    WarpgateOtpModalComponent,
   ],
   providers: [
     // Core services
