@@ -468,7 +468,499 @@ describe('WarpgateApiClient', () => {
       expect(result.success).toBe(false);
     });
   });
+
+  describe('admin user management', () => {
+    it('should get all users', async () => {
+      const mockUsers = [
+        { id: 'user-1', username: 'alice' },
+        { id: 'user-2', username: 'bob' },
+      ];
+      mockFetch.mockResolvedValueOnce(createMockResponse(mockUsers));
+
+      const result = await client.getUsers();
+
+      expect(mockFetch).toHaveBeenCalledWith(
+        'https://warpgate.example.com/@warpgate/api/users',
+        expect.any(Object)
+      );
+      expect(result.success).toBe(true);
+      expect(result.data).toHaveLength(2);
+    });
+
+    it('should get a specific user', async () => {
+      const mockUser = { id: 'user-1', username: 'alice' };
+      mockFetch.mockResolvedValueOnce(createMockResponse(mockUser));
+
+      const result = await client.getUser('user-1');
+
+      expect(mockFetch).toHaveBeenCalledWith(
+        'https://warpgate.example.com/@warpgate/api/users/user-1',
+        expect.any(Object)
+      );
+      expect(result.success).toBe(true);
+      expect(result.data?.username).toBe('alice');
+    });
+
+    it('should get user by username', async () => {
+      const mockUsers = [
+        { id: 'user-1', username: 'alice' },
+        { id: 'user-2', username: 'bob' },
+      ];
+      mockFetch.mockResolvedValueOnce(createMockResponse(mockUsers));
+
+      const result = await client.getUserByUsername('bob');
+
+      expect(result.success).toBe(true);
+      expect(result.data?.id).toBe('user-2');
+    });
+
+    it('should return null when user not found by username', async () => {
+      const mockUsers = [
+        { id: 'user-1', username: 'alice' },
+      ];
+      mockFetch.mockResolvedValueOnce(createMockResponse(mockUsers));
+
+      const result = await client.getUserByUsername('charlie');
+
+      expect(result.success).toBe(true);
+      expect(result.data).toBeNull();
+    });
+
+    it('should propagate error when getUserByUsername fails', async () => {
+      mockFetch.mockResolvedValueOnce(createMockResponse(
+        { error: 'Unauthorized' },
+        { ok: false, status: 403 }
+      ));
+
+      const result = await client.getUserByUsername('bob');
+
+      expect(result.success).toBe(false);
+    });
+  });
+
+  describe('admin OTP management', () => {
+    it('should get OTP credentials for a user', async () => {
+      const mockCreds = [{ id: 'cred-1', kind: 'Totp' }];
+      mockFetch.mockResolvedValueOnce(createMockResponse(mockCreds));
+
+      const result = await client.getOtpCredentials('user-1');
+
+      expect(mockFetch).toHaveBeenCalledWith(
+        'https://warpgate.example.com/@warpgate/api/users/user-1/credentials/otp',
+        expect.any(Object)
+      );
+      expect(result.success).toBe(true);
+      expect(result.data).toHaveLength(1);
+    });
+
+    it('should create OTP credential for a user', async () => {
+      const mockCred = { id: 'cred-new', kind: 'Totp' };
+      mockFetch.mockResolvedValueOnce(createMockResponse(mockCred));
+
+      const result = await client.createOtpCredential('user-1', [1, 2, 3]);
+
+      expect(mockFetch).toHaveBeenCalledWith(
+        'https://warpgate.example.com/@warpgate/api/users/user-1/credentials/otp',
+        expect.objectContaining({
+          method: 'POST',
+          body: JSON.stringify({ secret_key: [1, 2, 3] }),
+        })
+      );
+      expect(result.success).toBe(true);
+    });
+
+    it('should delete OTP credential for a user', async () => {
+      mockFetch.mockResolvedValueOnce(createMockResponse(null, { status: 204 }));
+
+      const result = await client.deleteOtpCredential('user-1', 'cred-1');
+
+      expect(mockFetch).toHaveBeenCalledWith(
+        'https://warpgate.example.com/@warpgate/api/users/user-1/credentials/otp/cred-1',
+        expect.objectContaining({ method: 'DELETE' })
+      );
+      expect(result.success).toBe(true);
+    });
+
+    it('should check if user has OTP credential', async () => {
+      const mockCreds = [{ id: 'cred-1', kind: 'Totp' }];
+      mockFetch.mockResolvedValueOnce(createMockResponse(mockCreds));
+
+      const hasOtp = await client.hasOtpCredential('user-1');
+
+      expect(hasOtp).toBe(true);
+    });
+
+    it('should return false when user has no OTP credentials', async () => {
+      mockFetch.mockResolvedValueOnce(createMockResponse([]));
+
+      const hasOtp = await client.hasOtpCredential('user-1');
+
+      expect(hasOtp).toBe(false);
+    });
+
+    it('should return false when getOtpCredentials fails', async () => {
+      mockFetch.mockResolvedValueOnce(createMockResponse(
+        { error: 'Not found' },
+        { ok: false, status: 404 }
+      ));
+
+      const hasOtp = await client.hasOtpCredential('user-1');
+
+      expect(hasOtp).toBe(false);
+    });
+  });
+
+  describe('error handling edge cases', () => {
+    it('should handle non-JSON error responses with short text', async () => {
+      mockFetch.mockResolvedValueOnce(createMockResponse(
+        null,
+        {
+          ok: false,
+          status: 500,
+          statusText: 'Server Error',
+          headers: new Map([['content-type', 'text/plain']]),
+        }
+      ));
+
+      // Override text() to return plain text
+      mockFetch.mockImplementationOnce(() => ({
+        ok: false,
+        status: 500,
+        statusText: 'Server Error',
+        headers: {
+          get: (name: string) => name === 'content-type' ? 'text/plain' : null,
+        },
+        text: async () => 'Short error',
+      }));
+
+      const result = await client.getTargets();
+
+      expect(result.success).toBe(false);
+      expect(result.error?.message).toContain('Short error');
+    });
+
+    it('should truncate long error messages', async () => {
+      const longError = 'x'.repeat(300);
+      mockFetch.mockImplementationOnce(() => ({
+        ok: false,
+        status: 500,
+        statusText: 'Server Error',
+        headers: {
+          get: () => null,
+        },
+        text: async () => longError,
+      }));
+
+      const result = await client.getTargets();
+
+      expect(result.success).toBe(false);
+      // Should not include the full error text (truncated at 200 chars)
+      expect(result.error?.message.includes(longError)).toBe(false);
+    });
+
+    it('should handle empty error response', async () => {
+      mockFetch.mockImplementationOnce(() => ({
+        ok: false,
+        status: 500,
+        statusText: 'Internal Server Error',
+        headers: {
+          get: () => null,
+        },
+        text: async () => '',
+      }));
+
+      const result = await client.getTargets();
+
+      expect(result.success).toBe(false);
+      expect(result.error?.message).toContain('500');
+      expect(result.error?.message).toContain('Internal Server Error');
+    });
+
+    it('should handle JSON parse error in response', async () => {
+      mockFetch.mockImplementationOnce(() => ({
+        ok: false,
+        status: 400,
+        statusText: 'Bad Request',
+        headers: {
+          get: () => null,
+        },
+        text: async () => 'Not valid JSON {',
+      }));
+
+      const result = await client.getTargets();
+
+      expect(result.success).toBe(false);
+      expect(result.error?.status).toBe(400);
+    });
+
+    it('should handle ENOTFOUND network error', async () => {
+      mockFetch.mockRejectedValueOnce(new Error('getaddrinfo ENOTFOUND example.com'));
+
+      const result = await client.getTargets();
+
+      expect(result.success).toBe(false);
+      expect(result.error?.message).toContain('Server not found');
+    });
+
+    it('should handle ETIMEDOUT network error', async () => {
+      mockFetch.mockRejectedValueOnce(new Error('ETIMEDOUT connection timeout'));
+
+      const result = await client.getTargets();
+
+      expect(result.success).toBe(false);
+      expect(result.error?.message).toContain('Connection timed out');
+    });
+
+    it('should handle ESOCKETTIMEDOUT network error', async () => {
+      mockFetch.mockRejectedValueOnce(new Error('ESOCKETTIMEDOUT socket timeout'));
+
+      const result = await client.getTargets();
+
+      expect(result.success).toBe(false);
+      expect(result.error?.message).toContain('Connection timed out');
+    });
+
+    it('should handle certificate errors', async () => {
+      mockFetch.mockRejectedValueOnce(new Error('CERT_HAS_EXPIRED'));
+
+      const result = await client.getTargets();
+
+      expect(result.success).toBe(false);
+      expect(result.error?.message).toContain('Certificate error');
+    });
+
+    it('should handle ECONNRESET error', async () => {
+      mockFetch.mockRejectedValueOnce(new Error('ECONNRESET connection reset'));
+
+      const result = await client.getTargets();
+
+      expect(result.success).toBe(false);
+      expect(result.error?.message).toContain('Connection reset');
+    });
+
+    it('should handle unknown errors', async () => {
+      mockFetch.mockRejectedValueOnce(new Error('Unknown weird error'));
+
+      const result = await client.getTargets();
+
+      expect(result.success).toBe(false);
+      expect(result.error?.message).toBe('Unknown weird error');
+    });
+
+    it('should handle non-Error exceptions', async () => {
+      mockFetch.mockRejectedValueOnce('string error');
+
+      const result = await client.getTargets();
+
+      expect(result.success).toBe(false);
+      expect(result.error?.message).toBe('Unknown error');
+    });
+  });
+
+  describe('auth state edge cases', () => {
+    it('should handle PasswordNeeded state', async () => {
+      mockFetch.mockImplementationOnce(() => ({
+        ok: false,
+        status: 401,
+        headers: {
+          get: () => null,
+        },
+        text: async () => JSON.stringify({ state: 'PasswordNeeded' }),
+      }));
+
+      const result = await client.login({ username: 'user', password: 'pass' });
+
+      expect(result.success).toBe(true);
+      expect(result.data?.state?.auth?.state).toBe('Need');
+      expect(result.data?.state?.auth?.methods_remaining).toContain('Password');
+    });
+
+    it('should handle Failed state', async () => {
+      mockFetch.mockImplementationOnce(() => ({
+        ok: false,
+        status: 401,
+        headers: {
+          get: () => null,
+        },
+        text: async () => JSON.stringify({ state: 'Failed' }),
+      }));
+
+      const result = await client.login({ username: 'user', password: 'wrong' });
+
+      expect(result.success).toBe(true);
+      expect(result.data?.state?.auth?.state).toBe('Rejected');
+    });
+
+    it('should handle Rejected state', async () => {
+      mockFetch.mockImplementationOnce(() => ({
+        ok: false,
+        status: 401,
+        headers: {
+          get: () => null,
+        },
+        text: async () => JSON.stringify({ state: 'Rejected' }),
+      }));
+
+      const result = await client.login({ username: 'user', password: 'wrong' });
+
+      expect(result.success).toBe(true);
+      expect(result.data?.state?.auth?.state).toBe('Rejected');
+    });
+
+    it('should handle NotStarted state as error', async () => {
+      mockFetch.mockImplementationOnce(() => ({
+        ok: false,
+        status: 401,
+        headers: {
+          get: () => null,
+        },
+        text: async () => JSON.stringify({ state: 'NotStarted' }),
+      }));
+
+      const result = await client.login({ username: 'user', password: 'pass' });
+
+      expect(result.success).toBe(false);
+      expect(result.error?.message).toContain('Session expired');
+    });
+
+    it('should handle 401 without state field', async () => {
+      mockFetch.mockImplementationOnce(() => ({
+        ok: false,
+        status: 401,
+        headers: {
+          get: () => null,
+        },
+        text: async () => JSON.stringify({ error: 'Unauthorized' }),
+      }));
+
+      const result = await client.login({ username: 'user', password: 'pass' });
+
+      expect(result.success).toBe(false);
+      expect(result.error?.status).toBe(401);
+    });
+
+    it('should handle 401 with malformed JSON', async () => {
+      mockFetch.mockImplementationOnce(() => ({
+        ok: false,
+        status: 401,
+        headers: {
+          get: () => null,
+        },
+        text: async () => 'Not JSON',
+      }));
+
+      const result = await client.login({ username: 'user', password: 'pass' });
+
+      expect(result.success).toBe(false);
+      expect(result.error?.status).toBe(401);
+    });
+
+    it('should handle network error during login', async () => {
+      mockFetch.mockRejectedValueOnce(new Error('Network failure'));
+
+      const result = await client.login({ username: 'user', password: 'pass' });
+
+      expect(result.success).toBe(false);
+      expect(result.error?.status).toBe(0);
+    });
+  });
+
+  describe('response content type handling', () => {
+    it('should handle non-JSON content-type', async () => {
+      mockFetch.mockResolvedValueOnce(createMockResponse(
+        null,
+        {
+          ok: true,
+          status: 200,
+          headers: new Map([['content-type', 'text/html']]),
+        }
+      ));
+
+      const result = await client.getTargets();
+
+      expect(result.success).toBe(true);
+      expect(result.data).toBeUndefined();
+    });
+
+    it('should handle missing content-type header', async () => {
+      mockFetch.mockImplementationOnce(() => ({
+        ok: true,
+        status: 200,
+        headers: {
+          get: () => null,
+        },
+        text: async () => '',
+      }));
+
+      const result = await client.getTargets();
+
+      expect(result.success).toBe(true);
+      expect(result.data).toBeUndefined();
+    });
+
+    it('should handle empty response body with JSON content-type', async () => {
+      mockFetch.mockImplementationOnce(() => ({
+        ok: true,
+        status: 200,
+        headers: {
+          get: (name: string) => name === 'content-type' ? 'application/json' : null,
+        },
+        text: async () => '',
+      }));
+
+      const result = await client.getTargets();
+
+      expect(result.success).toBe(true);
+      expect(result.data).toBeUndefined();
+    });
+  });
+
+  describe('getUserInfo', () => {
+    it('should fetch user info', async () => {
+      const mockInfo = {
+        username: 'testuser',
+        version: { commit: 'abc123' },
+      };
+      mockFetch.mockResolvedValueOnce(createMockResponse(mockInfo));
+
+      const result = await client.getUserInfo();
+
+      expect(mockFetch).toHaveBeenCalledWith(
+        'https://warpgate.example.com/@warpgate/api/info',
+        expect.any(Object)
+      );
+      expect(result.success).toBe(true);
+      expect(result.data?.username).toBe('testuser');
+    });
+  });
+
+  describe('SSH target filtering edge cases', () => {
+    it('should return error when getTargets fails for getSshTargets', async () => {
+      mockFetch.mockResolvedValueOnce(createMockResponse(
+        { error: 'Unauthorized' },
+        { ok: false, status: 403 }
+      ));
+
+      const result = await client.getSshTargets();
+
+      expect(result.success).toBe(false);
+    });
+
+    it('should handle empty SSH targets', async () => {
+      const mockTargets = [
+        { name: 'http-server', kind: 'Http' },
+        { name: 'mysql-server', kind: 'MySql' },
+      ];
+      mockFetch.mockResolvedValueOnce(createMockResponse(mockTargets));
+
+      const result = await client.getSshTargets();
+
+      expect(result.success).toBe(true);
+      expect(result.data).toEqual([]);
+    });
+  });
 });
+
 
 /**
  * Testable version of WarpgateApiClient that allows mocking fetch

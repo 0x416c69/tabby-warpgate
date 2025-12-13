@@ -193,8 +193,9 @@ export class WarpgateService {
 
   /**
    * Add a new server
+   * Optionally reuses an existing test connection session to avoid re-authentication
    */
-  async addServer(server: Omit<WarpgateServerConfig, 'id'>): Promise<WarpgateServerConfig> {
+  async addServer(server: Omit<WarpgateServerConfig, 'id'>, reuseTestSession = true): Promise<WarpgateServerConfig> {
     const newServer: WarpgateServerConfig = {
       ...server,
       id: this.generateId(),
@@ -213,8 +214,50 @@ export class WarpgateService {
 
       // Create client and connect if enabled
       if (newServer.enabled) {
-        this.createClient(newServer);
-        await this.connect(newServer.id);
+        // Check if we have a test session we can reuse
+        const testClientKey = `test:${newServer.url}:${newServer.username}`;
+        const testClient = this.testClients.get(testClientKey);
+
+        if (reuseTestSession && testClient && testClient.hasSession()) {
+          console.log('[Warpgate] Reusing test connection session for new server');
+
+          // Transfer the session to the new client
+          const sessionCookie = testClient.getSessionCookie();
+          const client = this.createClient(newServer);
+
+          if (sessionCookie) {
+            client.setSessionCookie(sessionCookie);
+
+            // Store the session
+            const session: WarpgateSession = {
+              serverId: newServer.id,
+              cookie: sessionCookie,
+              expiresAt: new Date(Date.now() + 24 * 60 * 60 * 1000),
+              username: newServer.username,
+            };
+            this.sessions.set(newServer.id, session);
+
+            // Clean up test client and timer
+            this.testClients.delete(testClientKey);
+            const timer = this.testClientTimers.get(testClientKey);
+            if (timer) {
+              clearTimeout(timer);
+              this.testClientTimers.delete(testClientKey);
+            }
+
+            // Fetch targets without re-authenticating
+            await this.refreshTargets(newServer.id);
+            this.updateConnectionStatus(newServer.id, true);
+            this.showNotification('info', `Server ${newServer.name} added successfully`);
+          } else {
+            // No session cookie, connect normally
+            await this.connect(newServer.id);
+          }
+        } else {
+          // No test session available, connect normally
+          this.createClient(newServer);
+          await this.connect(newServer.id);
+        }
       }
 
       this.emitEvent({ type: 'server-added', serverId: newServer.id, data: newServer });
@@ -1050,6 +1093,7 @@ export class WarpgateService {
   /**
    * Test connection to a server with full OTP support
    * Returns needsOtp: true if server requires OTP authentication
+   * IMPORTANT: Keeps the session alive for reuse when adding the server
    */
   async testServerConnectionFull(
     url: string,
@@ -1057,14 +1101,22 @@ export class WarpgateService {
     password: string,
     trustSelfSigned = false,
     otpCode?: string
-  ): Promise<{ success: boolean; needsOtp?: boolean; error?: string }> {
+  ): Promise<{ success: boolean; needsOtp?: boolean; error?: string; sessionCookie?: string }> {
     // Store client temporarily for OTP follow-up
-    const clientKey = `test:${url}`;
+    const clientKey = `test:${url}:${username}`;
     let client = this.testClients.get(clientKey);
 
     if (!client) {
       client = new WarpgateApiClient(url, trustSelfSigned);
       this.testClients.set(clientKey, client);
+
+      // Schedule cleanup after 5 minutes if not used
+      const timer = setTimeout(() => {
+        this.testClients.delete(clientKey);
+        this.testClientTimers.delete(clientKey);
+        console.log('[Warpgate] Cleaned up unused test session');
+      }, 5 * 60 * 1000);
+      this.testClientTimers.set(clientKey, timer);
     }
 
     try {
@@ -1084,9 +1136,10 @@ export class WarpgateService {
               // Check final auth state
               const finalAuthState = otpResult.data.state.auth;
               if (finalAuthState?.state === 'Accepted') {
-                await client.logout();
-                this.testClients.delete(clientKey);
-                return { success: true };
+                // DON'T logout - keep session for reuse
+                const sessionCookie = client.getSessionCookie();
+                console.log('[Warpgate] Test connection successful, session preserved');
+                return { success: true, sessionCookie: sessionCookie || undefined };
               }
             }
             return { success: false, error: otpResult.error?.message || 'OTP verification failed' };
@@ -1098,9 +1151,10 @@ export class WarpgateService {
 
         // Check if authentication was accepted
         if (authState.auth?.state === 'Accepted') {
-          await client.logout();
-          this.testClients.delete(clientKey);
-          return { success: true };
+          // DON'T logout - keep session for reuse
+          const sessionCookie = client.getSessionCookie();
+          console.log('[Warpgate] Test connection successful, session preserved');
+          return { success: true, sessionCookie: sessionCookie || undefined };
         }
 
         // Auth in progress but not complete
@@ -1163,11 +1217,21 @@ export class WarpgateService {
   /** Temporary clients for test connections (to maintain session for OTP) */
   private testClients: Map<string, WarpgateApiClient> = new Map();
 
+  /** Test client cleanup timers */
+  private testClientTimers: Map<string, NodeJS.Timeout> = new Map();
+
   /**
    * Clean up on destroy
    */
   destroy(): void {
     this.stopAutoRefresh();
     this.disconnectAll();
+
+    // Clean up test client timers
+    for (const timer of this.testClientTimers.values()) {
+      clearTimeout(timer);
+    }
+    this.testClientTimers.clear();
+    this.testClients.clear();
   }
 }

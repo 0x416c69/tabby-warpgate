@@ -42,6 +42,7 @@ module.exports = {
     '^tabby-ssh$': '<rootDir>/src/__mocks__/tabby-ssh.ts',
     '^tabby-terminal$': '<rootDir>/src/__mocks__/tabby-terminal.ts',
     '^@angular/core$': '<rootDir>/src/__mocks__/angular-core.ts',
+    '^@ng-bootstrap/ng-bootstrap$': '<rootDir>/src/__mocks__/ng-bootstrap.ts',
   },
   setupFilesAfterEnv: ['<rootDir>/src/__tests__/setup.ts'],
   verbose: true,
