@@ -9,6 +9,10 @@ import { SSHProfile } from 'tabby-ssh';
 
 import { WarpgateService } from './warpgate.service';
 import { WarpgateTarget, WarpgateServerConfig } from '../models/warpgate.models';
+import { BOOTSTRAP_COLORS, THEME_ICONS } from '../models/theme.constants';
+import { getDefaultSshAlgorithms, getDefaultSshOptions } from '../models/ssh-profile.defaults';
+import { createSftpProfile, createSftpProfileMetadata } from '../utils/sftp-profile.factory';
+import { getErrorMessage } from '../utils/error-handling';
 
 /** Extended SSH profile with Warpgate metadata */
 export interface WarpgateSSHProfile extends SSHProfile {
@@ -33,17 +37,6 @@ export class WarpgateProfileProvider extends ProfileProvider<WarpgateSSHProfile>
   name = 'Warpgate SSH';
   supportsQuickConnect = false;
   settingsComponent = null;
-
-  private iconMap: Record<string, string> = {
-    primary: 'fas fa-server',
-    secondary: 'fas fa-desktop',
-    success: 'fas fa-check-circle',
-    danger: 'fas fa-exclamation-triangle',
-    warning: 'fas fa-exclamation-circle',
-    info: 'fas fa-info-circle',
-    light: 'fas fa-sun',
-    dark: 'fas fa-moon',
-  };
 
   constructor(@Inject(WarpgateService) private warpgateService: WarpgateService) {
     super();
@@ -96,25 +89,8 @@ export class WarpgateProfileProvider extends ProfileProvider<WarpgateSSHProfile>
         // For traditional auth: password is provided
         auth: connectionDetails.useTicket ? 'none' : 'password',
         password: connectionDetails.useTicket ? undefined : connectionDetails.password,
-        keepaliveInterval: 30,
-        keepaliveCountMax: 3,
-        readyTimeout: 20000,
-        x11: false,
-        skipBanner: false,
-        jumpHost: '',
-        agentForward: false,
-        socksProxyHost: '',
-        socksProxyPort: 0,
-        httpProxyHost: '',
-        httpProxyPort: 0,
-        scripts: [],
-        forwardedPorts: [],
-        algorithms: {
-          hmac: [],
-          kex: [],
-          cipher: [],
-          serverHostKey: [],
-        },
+        ...getDefaultSshOptions(),
+        algorithms: getDefaultSshAlgorithms(),
       },
       warpgate: {
         serverId: server.id,
@@ -161,25 +137,8 @@ export class WarpgateProfileProvider extends ProfileProvider<WarpgateSSHProfile>
         port: ticketDetails.port,
         user: ticketDetails.username, // Contains ticket-<secret>
         auth: 'none', // No password needed with ticket
-        keepaliveInterval: 30,
-        keepaliveCountMax: 3,
-        readyTimeout: 20000,
-        x11: false,
-        skipBanner: false,
-        jumpHost: '',
-        agentForward: false,
-        socksProxyHost: '',
-        socksProxyPort: 0,
-        httpProxyHost: '',
-        httpProxyPort: 0,
-        scripts: [],
-        forwardedPorts: [],
-        algorithms: {
-          hmac: [],
-          kex: [],
-          cipher: [],
-          serverHostKey: [],
-        },
+        ...getDefaultSshOptions(),
+        algorithms: getDefaultSshAlgorithms(),
       },
       warpgate: {
         serverId: server.id,
@@ -237,25 +196,8 @@ export class WarpgateProfileProvider extends ProfileProvider<WarpgateSSHProfile>
         // and use the stored password for password prompts
         auth: 'password',
         password: authDetails.password,
-        keepaliveInterval: 30,
-        keepaliveCountMax: 3,
-        readyTimeout: 20000,
-        x11: false,
-        skipBanner: false,
-        jumpHost: '',
-        agentForward: false,
-        socksProxyHost: '',
-        socksProxyPort: 0,
-        httpProxyHost: '',
-        httpProxyPort: 0,
-        scripts: [],
-        forwardedPorts: [],
-        algorithms: {
-          hmac: [],
-          kex: [],
-          cipher: [],
-          serverHostKey: [],
-        },
+        ...getDefaultSshOptions(),
+        algorithms: getDefaultSshAlgorithms(),
       },
       warpgate: {
         serverId: server.id,
@@ -298,7 +240,7 @@ export class WarpgateProfileProvider extends ProfileProvider<WarpgateSSHProfile>
    */
   private getIconForTarget(target: WarpgateTarget): string {
     if (target.group?.color) {
-      return this.iconMap[target.group.color] || 'fas fa-server';
+      return THEME_ICONS[target.group.color] || 'fas fa-server';
     }
     return 'fas fa-server';
   }
@@ -307,21 +249,7 @@ export class WarpgateProfileProvider extends ProfileProvider<WarpgateSSHProfile>
    * Get color for a target
    */
   private getColorForTarget(target: WarpgateTarget): string | undefined {
-    const colorMap: Record<string, string> = {
-      primary: '#007bff',
-      secondary: '#6c757d',
-      success: '#28a745',
-      danger: '#dc3545',
-      warning: '#ffc107',
-      info: '#17a2b8',
-      light: '#f8f9fa',
-      dark: '#343a40',
-    };
-
-    if (target.group?.color) {
-      return colorMap[target.group.color];
-    }
-    return undefined;
+    return target.group?.color ? BOOTSTRAP_COLORS[target.group.color] : undefined;
   }
 
   /**
@@ -469,27 +397,21 @@ export class WarpgateSFTPProfileProvider extends ProfileProvider<WarpgateSFTPPro
       throw new Error(`Cannot get ticket for ${target.name}`);
     }
 
-    return {
-      id: `warpgate-sftp:${server.id}:${target.name}:ticket`,
-      type: 'sftp',
-      name: `${target.name} (SFTP)`,
-      group: `Warpgate SFTP/${target.group?.name || server.name}`,
-      icon: 'fas fa-folder',
-      isBuiltin: true,
-      isTemplate: false,
-      warpgate: {
+    return createSftpProfile(
+      {
         serverId: server.id,
         serverName: server.name,
         targetName: target.name,
+        groupName: target.group?.name,
+        useTicket: true,
       },
-      options: {
+      {
         host: ticketDetails.host,
         port: ticketDetails.port,
         user: ticketDetails.username, // Contains ticket-<secret>
-        // No password needed with ticket auth
         initialPath: config.defaultSftpPath || '~',
-      },
-    };
+      }
+    );
   }
 
   /**
@@ -512,27 +434,22 @@ export class WarpgateSFTPProfileProvider extends ProfileProvider<WarpgateSFTPPro
       return this.createSftpProfileWithTicket(server, target);
     }
 
-    return {
-      id: `warpgate-sftp:${server.id}:${target.name}:autoauth`,
-      type: 'sftp',
-      name: `${target.name} (SFTP)`,
-      group: `Warpgate SFTP/${target.group?.name || server.name}`,
-      icon: 'fas fa-folder',
-      isBuiltin: true,
-      isTemplate: false,
-      warpgate: {
+    return createSftpProfile(
+      {
         serverId: server.id,
         serverName: server.name,
         targetName: target.name,
+        groupName: target.group?.name,
+        useTicket: false,
       },
-      options: {
+      {
         host: authDetails.host,
         port: authDetails.port,
         user: authDetails.username,
         password: authDetails.password,
         initialPath: config.defaultSftpPath || '~',
-      },
-    };
+      }
+    );
   }
 
   /**

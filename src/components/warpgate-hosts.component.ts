@@ -16,6 +16,7 @@ import {
   WarpgateConnectionStatus,
   WarpgatePluginConfig,
 } from '../models/warpgate.models';
+import { getBootstrapColor } from '../models/theme.constants';
 
 /** Host item for display */
 interface HostItem {
@@ -463,7 +464,7 @@ export class WarpgateHostsComponent implements OnInit, OnDestroy {
         if (host.target.group) {
           groupKey = `${host.server.id}:${host.target.group.name}`;
           groupName = `${host.server.name} / ${host.target.group.name}`;
-          groupColor = this.getBootstrapColor(host.target.group.color);
+          groupColor = getBootstrapColor(host.target.group.color);
         } else {
           groupKey = host.server.id;
           groupName = host.server.name;
@@ -473,7 +474,7 @@ export class WarpgateHostsComponent implements OnInit, OnDestroy {
         if (host.target.group) {
           groupKey = host.target.group.name;
           groupName = host.target.group.name;
-          groupColor = this.getBootstrapColor(host.target.group.color);
+          groupColor = getBootstrapColor(host.target.group.color);
         } else {
           groupKey = '__ungrouped__';
           groupName = 'Ungrouped';
@@ -495,23 +496,6 @@ export class WarpgateHostsComponent implements OnInit, OnDestroy {
     return Array.from(groupMap.values()).sort((a, b) =>
       a.name.localeCompare(b.name)
     );
-  }
-
-  /**
-   * Get Bootstrap color value
-   */
-  private getBootstrapColor(color?: string): string | undefined {
-    const colorMap: Record<string, string> = {
-      primary: '#007bff',
-      secondary: '#6c757d',
-      success: '#28a745',
-      danger: '#dc3545',
-      warning: '#ffc107',
-      info: '#17a2b8',
-      light: '#f8f9fa',
-      dark: '#343a40',
-    };
-    return color ? colorMap[color] : undefined;
   }
 
   /**
