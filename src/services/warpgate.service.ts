@@ -17,8 +17,12 @@ import {
   DEFAULT_WARPGATE_CONFIG,
   WarpgateSession,
   WarpgateCachedTicket,
+  WarpgateServerInfo,
 } from '../models/warpgate.models';
 import { generateTOTP, isValidTOTPSecret } from '../utils/totp';
+import { initDebugLogger, createLogger } from '../utils/debug-logger';
+
+const log = createLogger('Service');
 
 /** Event types for Warpgate service events */
 export type WarpgateEventType =
@@ -52,6 +56,9 @@ export class WarpgateService {
   /** Map of cached tickets by "serverId:targetName" key */
   private ticketCache: Map<string, WarpgateCachedTicket> = new Map();
 
+  /** Map of server info (includes external_host) by server ID */
+  private serverInfo: Map<string, WarpgateServerInfo> = new Map();
+
   /** Connection status by server ID */
   private connectionStatus: Map<string, WarpgateConnectionStatus> = new Map();
 
@@ -69,6 +76,12 @@ export class WarpgateService {
 
   /** Subject for loading state */
   private loadingSubject = new BehaviorSubject<boolean>(false);
+
+  /** Connection locks to prevent concurrent auth attempts */
+  private connectingLocks = new Map<string, Promise<boolean>>();
+
+  /** Ticket creation locks to prevent multiple tickets for same target */
+  private ticketLocks = new Map<string, Promise<{ host: string; port: number; username: string } | null>>();
 
   /** Observable for targets by server */
   readonly targets$: Observable<Map<string, WarpgateTarget[]>> = this.targetsSubject.asObservable();
@@ -88,6 +101,8 @@ export class WarpgateService {
     @Optional() @Inject(PlatformService) private platform: PlatformService | null,
     private injector: Injector
   ) {
+    // Initialize the debug logger with config service
+    initDebugLogger(config);
     this.initialize();
   }
 
@@ -114,7 +129,7 @@ export class WarpgateService {
    * Get plugin configuration
    */
   getConfig(): WarpgatePluginConfig {
-    return this.config.store.warpgate || DEFAULT_WARPGATE_CONFIG;
+    return this.config.store?.warpgate || DEFAULT_WARPGATE_CONFIG;
   }
 
   /**
@@ -127,12 +142,12 @@ export class WarpgateService {
       // First check if warpgate exists in store
       if (!this.config.store.warpgate) {
         // This shouldn't happen if ConfigProvider is set up correctly
-        console.error('[Warpgate] Config store.warpgate not initialized!');
+        log.error('Config store.warpgate not initialized!');
         return;
       }
 
       const warpgateConfig = this.config.store.warpgate;
-      console.log('[Warpgate] Saving config, current servers:', warpgateConfig.servers?.length ?? 0);
+      log.debug('Saving config, current servers:', warpgateConfig.servers?.length ?? 0);
 
       // Update individual properties on the existing object
       // For arrays, we need to modify in place or replace carefully
@@ -156,12 +171,18 @@ export class WarpgateService {
       if (pluginConfig.defaultSftpPath !== undefined) {
         warpgateConfig.defaultSftpPath = pluginConfig.defaultSftpPath;
       }
+      if (pluginConfig.authMethod !== undefined) {
+        warpgateConfig.authMethod = pluginConfig.authMethod;
+      }
+      if (pluginConfig.debugMode !== undefined) {
+        warpgateConfig.debugMode = pluginConfig.debugMode;
+      }
 
-      console.log('[Warpgate] Config updated, servers now:', warpgateConfig.servers?.length ?? 0);
+      log.debug('Config updated, servers now:', warpgateConfig.servers?.length ?? 0);
       this.config.save();
-      console.log('[Warpgate] Config saved');
+      log.debug('Config saved');
     } catch (error) {
-      console.error('[Warpgate] Failed to save config:', error);
+      log.error('Failed to save config:', error);
       // Fallback: try direct property access on store
       try {
         const store = this.config.store as Record<string, unknown>;
@@ -170,9 +191,9 @@ export class WarpgateService {
         }
         Object.assign(store['warpgate'] as object, pluginConfig);
         this.config.save();
-        console.log('[Warpgate] Config saved via fallback');
+        log.debug('Config saved via fallback');
       } catch (fallbackError) {
-        console.error('[Warpgate] Fallback save also failed:', fallbackError);
+        log.error('Fallback save also failed:', fallbackError);
       }
     }
   }
@@ -209,7 +230,7 @@ export class WarpgateService {
 
       // Push directly to the proxy array
       this.config.store.warpgate.servers.push(newServer);
-      console.log('[Warpgate] Added server, total servers:', this.config.store.warpgate.servers.length);
+      log.debug('Added server, total servers:', this.config.store.warpgate.servers.length);
       this.config.save();
 
       // Create client and connect if enabled
@@ -219,7 +240,7 @@ export class WarpgateService {
         const testClient = this.testClients.get(testClientKey);
 
         if (reuseTestSession && testClient && testClient.hasSession()) {
-          console.log('[Warpgate] Reusing test connection session for new server');
+          log.debug('Reusing test connection session for new server');
 
           // Transfer the session to the new client
           const sessionCookie = testClient.getSessionCookie();
@@ -263,7 +284,7 @@ export class WarpgateService {
       this.emitEvent({ type: 'server-added', serverId: newServer.id, data: newServer });
       return newServer;
     } catch (error) {
-      console.error('[Warpgate] Failed to add server:', error);
+      log.error('Failed to add server:', error);
       throw error;
     }
   }
@@ -292,7 +313,7 @@ export class WarpgateService {
       // Replace in the proxy array (this triggers reactivity)
       servers[index] = updatedServer;
 
-      console.log('[Warpgate] Updated server in config, total servers:', servers.length);
+      log.debug('Updated server in config, total servers:', servers.length);
       this.config.save();
 
       // Recreate client if URL or credentials changed
@@ -308,7 +329,7 @@ export class WarpgateService {
 
       this.emitEvent({ type: 'server-updated', serverId, data: updatedServer });
     } catch (error) {
-      console.error('[Warpgate] Failed to update server:', error);
+      log.error('Failed to update server:', error);
       throw error;
     }
   }
@@ -329,7 +350,7 @@ export class WarpgateService {
       if (index !== -1) {
         // Remove from proxy array using splice
         servers.splice(index, 1);
-        console.log('[Warpgate] Removed server, total servers:', servers.length);
+        log.debug('Removed server, total servers:', servers.length);
         this.config.save();
       }
 
@@ -341,7 +362,7 @@ export class WarpgateService {
       this.updateStatusSubject();
       this.emitEvent({ type: 'server-removed', serverId });
     } catch (error) {
-      console.error('[Warpgate] Failed to remove server:', error);
+      log.error('Failed to remove server:', error);
     }
   }
 
@@ -365,6 +386,13 @@ export class WarpgateService {
    * Connect to a server
    */
   async connect(serverId: string): Promise<boolean> {
+    // Prevent concurrent connection attempts - return existing promise if connecting
+    const existingLock = this.connectingLocks.get(serverId);
+    if (existingLock) {
+      log.debug(`Connection already in progress for ${serverId}, waiting...`);
+      return existingLock;
+    }
+
     const server = this.getServer(serverId);
     if (!server) {
       throw new Error(`Server ${serverId} not found`);
@@ -375,6 +403,25 @@ export class WarpgateService {
       client = this.createClient(server);
     }
 
+    // Create lock for this connection attempt
+    const connectPromise = this.doConnect(serverId, server, client);
+    this.connectingLocks.set(serverId, connectPromise);
+
+    try {
+      return await connectPromise;
+    } finally {
+      this.connectingLocks.delete(serverId);
+    }
+  }
+
+  /**
+   * Internal connection implementation
+   */
+  private async doConnect(
+    serverId: string,
+    server: WarpgateServerConfig,
+    client: WarpgateApiClient
+  ): Promise<boolean> {
     this.loadingSubject.next(true);
 
     try {
@@ -414,9 +461,9 @@ export class WarpgateService {
           if (server.otpSecret && isValidTOTPSecret(server.otpSecret)) {
             try {
               otpCode = await generateTOTP(server.otpSecret);
-              console.log('[Warpgate] Generated OTP from stored secret');
+              log.debug('Generated OTP from stored secret');
             } catch (otpError) {
-              console.error('[Warpgate] Failed to generate OTP:', otpError);
+              log.error('Failed to generate OTP:', otpError);
             }
           }
 
@@ -518,21 +565,42 @@ export class WarpgateService {
       throw new Error(`No client for server ${serverId}`);
     }
 
-    const result = await client.getSshTargets();
-    if (result.success && result.data) {
+    // Fetch server info (includes external_host) in parallel with targets
+    let targetsResult = await client.getSshTargets();
+    const infoResult = await client.getUserInfo();
+
+    // Store server info (includes external_host)
+    if (infoResult.success && infoResult.data) {
+      this.serverInfo.set(serverId, infoResult.data);
+    }
+
+    // If targets fetch failed with 401, retry once after a short delay
+    // This handles a race condition where the session might not be fully ready
+    if (!targetsResult.success && targetsResult.error?.status === 401) {
+      log.debug('Targets fetch returned 401, retrying after delay...');
+      await new Promise(resolve => setTimeout(resolve, 500));
+      targetsResult = await client.getSshTargets();
+    }
+
+    if (targetsResult.success && targetsResult.data) {
       const currentTargets = this.targetsSubject.getValue();
-      currentTargets.set(serverId, result.data);
+      currentTargets.set(serverId, targetsResult.data);
       this.targetsSubject.next(new Map(currentTargets));
 
       // Update connection status with targets
       const status = this.connectionStatus.get(serverId);
       if (status) {
-        status.targets = result.data;
+        status.targets = targetsResult.data;
         this.updateStatusSubject();
       }
 
-      this.emitEvent({ type: 'targets-updated', serverId, data: result.data });
-      return result.data;
+      this.emitEvent({ type: 'targets-updated', serverId, data: targetsResult.data });
+      return targetsResult.data;
+    }
+
+    // Log error if targets fetch failed
+    if (!targetsResult.success) {
+      log.error('Failed to fetch targets:', targetsResult.error);
     }
 
     return [];
@@ -607,8 +675,37 @@ export class WarpgateService {
     const server = this.getServer(serverId);
     const client = this.clients.get(serverId);
 
+    log.debug(`getSshConnectionDetails called for ${targetName} on server ${serverId}`);
+
     if (!server || !client) {
+      log.debug(`getSshConnectionDetails: server or client not found`);
       return null;
+    }
+
+    // Get external_host from server info (if configured in Warpgate)
+    const info = this.serverInfo.get(serverId);
+    const externalHost = info?.external_host;
+
+    // Use external_host from server info if available, otherwise fall back to Warpgate server host
+    // external_host may include port in format "hostname:port"
+    let sshHost: string;
+    let sshPort: number;
+
+    if (externalHost) {
+      const parts = externalHost.split(':');
+      if (parts.length === 2 && !isNaN(parseInt(parts[1], 10))) {
+        // external_host includes port: "hostname:port"
+        sshHost = parts[0];
+        sshPort = parseInt(parts[1], 10);
+      } else {
+        // external_host is just hostname/IP, use Warpgate SSH port from server info or default
+        sshHost = externalHost;
+        sshPort = info?.ports?.ssh || client.getSshPort(); // Use port from server info if available
+      }
+    } else {
+      // No external_host, use Warpgate server details
+      sshHost = client.getSshHost();
+      sshPort = client.getSshPort();
     }
 
     // Check if we have a valid cached ticket
@@ -616,21 +713,30 @@ export class WarpgateService {
     const cachedTicket = this.ticketCache.get(ticketKey);
     const hasOtpSecret = !!(server.otpSecret && isValidTOTPSecret(server.otpSecret));
 
+    log.debug(`Ticket cache check for ${ticketKey}: ${cachedTicket ? 'found' : 'not found'}`);
+    if (cachedTicket) {
+      const isValid = this.isTicketValid(cachedTicket);
+      log.debug(`Cached ticket valid: ${isValid}, expires: ${cachedTicket.expiresAt?.toISOString() || 'never'}`);
+    }
+
     if (cachedTicket && this.isTicketValid(cachedTicket)) {
       // Use ticket-based authentication (one-click, no password prompt)
+      const username = client.generateTicketUsername(cachedTicket.secret);
+      log.debug(`Using ticket auth, username: ${username}`);
       return {
-        host: client.getSshHost(),
-        port: client.getSshPort(),
-        username: client.generateTicketUsername(cachedTicket.secret),
+        host: sshHost,
+        port: sshPort,
+        username,
         useTicket: true,
         hasOtpSecret,
       };
     }
 
     // Fall back to traditional authentication (requires password)
+    log.debug(`Falling back to password auth for ${targetName}`);
     return {
-      host: client.getSshHost(),
-      port: client.getSshPort(),
+      host: sshHost,
+      port: sshPort,
       username: `${server.username}:${targetName}`,
       password: server.password,
       useTicket: false,
@@ -646,26 +752,83 @@ export class WarpgateService {
     serverId: string,
     targetName: string
   ): Promise<{ host: string; port: number; username: string } | null> {
+    const ticketKey = `${serverId}:${targetName}`;
+
+    // Prevent concurrent ticket creation for the same target
+    const existingLock = this.ticketLocks.get(ticketKey);
+    if (existingLock) {
+      log.debug(`Ticket creation already in progress for ${targetName}, waiting...`);
+      return existingLock;
+    }
+
     const server = this.getServer(serverId);
     const client = this.clients.get(serverId);
 
+    log.debug(`getOrCreateTicket called for ${targetName} on server ${serverId}`);
+
     if (!server || !client) {
+      log.debug(`getOrCreateTicket: server or client not found`);
       return null;
+    }
+
+    // Create lock for this ticket creation
+    const ticketPromise = this.doCreateTicket(serverId, targetName, server, client);
+    this.ticketLocks.set(ticketKey, ticketPromise);
+
+    try {
+      return await ticketPromise;
+    } finally {
+      this.ticketLocks.delete(ticketKey);
+    }
+  }
+
+  /**
+   * Internal ticket creation implementation
+   */
+  private async doCreateTicket(
+    serverId: string,
+    targetName: string,
+    server: WarpgateServerConfig,
+    client: WarpgateApiClient
+  ): Promise<{ host: string; port: number; username: string } | null> {
+    // Get external_host from server info (if configured in Warpgate)
+    const info = this.serverInfo.get(serverId);
+    const externalHost = info?.external_host;
+
+    // Use external_host from server info if available, otherwise fall back to Warpgate server host
+    // external_host may include port in format "hostname:port"
+    let sshHost: string;
+    let sshPort: number;
+
+    if (externalHost) {
+      const parts = externalHost.split(':');
+      if (parts.length === 2 && !isNaN(parseInt(parts[1], 10))) {
+        // external_host includes port: "hostname:port"
+        sshHost = parts[0];
+        sshPort = parseInt(parts[1], 10);
+      } else {
+        // external_host is just hostname/IP, use Warpgate SSH port from server info or default
+        sshHost = externalHost;
+        sshPort = info?.ports?.ssh || client.getSshPort(); // Use port from server info if available
+      }
+    } else {
+      // No external_host, use Warpgate server details
+      sshHost = client.getSshHost();
+      sshPort = client.getSshPort();
     }
 
     const ticketKey = `${serverId}:${targetName}`;
 
-    // Check for valid cached ticket
-    const cachedTicket = this.ticketCache.get(ticketKey);
-    if (cachedTicket && this.isTicketValid(cachedTicket)) {
-      return {
-        host: client.getSshHost(),
-        port: client.getSshPort(),
-        username: client.generateTicketUsername(cachedTicket.secret),
-      };
+    // Always create a fresh ticket for each connection attempt
+    // Tickets are one-time use, so caching them causes "Authentication rejected" on retry
+    // Clear any stale cached ticket first
+    if (this.ticketCache.has(ticketKey)) {
+      log.debug(`Clearing stale cached ticket for ${targetName}`);
+      this.ticketCache.delete(ticketKey);
     }
 
     // Create a new ticket
+    log.debug(`Creating new ticket for ${targetName}...`);
     try {
       const result = await client.createTicket({
         username: server.username,
@@ -673,6 +836,12 @@ export class WarpgateService {
         number_of_uses: 1, // One-time use
         description: `Tabby Warpgate auto-generated ticket for ${targetName}`,
       });
+
+      log.debug(`Ticket creation result: ${result.success ? 'success' : 'failed'}`);
+      if (!result.success) {
+        log.debug(`Ticket creation error:`, JSON.stringify(result.error, null, 2));
+        log.debug(`Full result:`, JSON.stringify(result, null, 2));
+      }
 
       if (result.success && result.data) {
         // Cache the ticket
@@ -685,20 +854,23 @@ export class WarpgateService {
         };
         this.ticketCache.set(ticketKey, ticket);
 
+        const username = client.generateTicketUsername(result.data.secret);
+        log.debug(`Ticket created successfully, username: ${username}`);
         return {
-          host: client.getSshHost(),
-          port: client.getSshPort(),
-          username: client.generateTicketUsername(result.data.secret),
+          host: sshHost,
+          port: sshPort,
+          username,
         };
       } else {
         // Ticket creation failed - fall back to traditional auth
+        log.debug(`Ticket creation failed, falling back to password auth`);
         this.showNotification(
           'warning',
           `Could not create ticket for ${targetName}, using password authentication`
         );
         return {
-          host: client.getSshHost(),
-          port: client.getSshPort(),
+          host: sshHost,
+          port: sshPort,
           username: `${server.username}:${targetName}`,
         };
       }
@@ -707,8 +879,8 @@ export class WarpgateService {
       const errorMessage = error instanceof Error ? error.message : 'Unknown error';
       this.showNotification('warning', `Ticket creation failed: ${errorMessage}`);
       return {
-        host: client.getSshHost(),
-        port: client.getSshPort(),
+        host: sshHost,
+        port: sshPort,
         username: `${server.username}:${targetName}`,
       };
     }
@@ -766,16 +938,24 @@ export class WarpgateService {
    * @returns Current TOTP code or null if no OTP secret configured
    */
   async generateOtpCode(serverId: string): Promise<string | null> {
+    const timestamp = new Date().toISOString();
+    log.debug(`generateOtpCode called at ${timestamp} for server ${serverId}`);
+
     const server = this.getServer(serverId);
     if (!server?.otpSecret || !isValidTOTPSecret(server.otpSecret)) {
+      log.debug(`No valid OTP secret for server ${serverId}`);
       return null;
     }
 
     try {
-      return await generateTOTP(server.otpSecret);
+      const code = await generateTOTP(server.otpSecret);
+      log.debug(`Generated TOTP code: ${code} at ${timestamp}`);
+      log.debug(`Secret (first 6 chars): ${server.otpSecret.substring(0, 6)}...`);
+      return code;
     } catch (error) {
       const errorMessage = error instanceof Error ? error.message : 'Unknown error';
       this.showNotification('error', `Failed to generate OTP: ${errorMessage}`);
+      log.error(`TOTP generation failed:`, error);
       return null;
     }
   }
@@ -1071,7 +1251,7 @@ export class WarpgateService {
       const result = await modalRef.result;
       return result?.trim() || null;
     } catch (error) {
-      console.error('[Warpgate] Failed to show OTP modal:', error);
+      log.error('Failed to show OTP modal:', error);
       this.showNotification('error', 'Failed to show OTP input dialog');
       return null;
     }
@@ -1114,7 +1294,7 @@ export class WarpgateService {
       const timer = setTimeout(() => {
         this.testClients.delete(clientKey);
         this.testClientTimers.delete(clientKey);
-        console.log('[Warpgate] Cleaned up unused test session');
+        log.debug('Cleaned up unused test session');
       }, 5 * 60 * 1000);
       this.testClientTimers.set(clientKey, timer);
     }
@@ -1138,7 +1318,7 @@ export class WarpgateService {
               if (finalAuthState?.state === 'Accepted') {
                 // DON'T logout - keep session for reuse
                 const sessionCookie = client.getSessionCookie();
-                console.log('[Warpgate] Test connection successful, session preserved');
+                log.debug('Test connection successful, session preserved');
                 return { success: true, sessionCookie: sessionCookie || undefined };
               }
             }
@@ -1153,7 +1333,7 @@ export class WarpgateService {
         if (authState.auth?.state === 'Accepted') {
           // DON'T logout - keep session for reuse
           const sessionCookie = client.getSessionCookie();
-          console.log('[Warpgate] Test connection successful, session preserved');
+          log.debug('Test connection successful, session preserved');
           return { success: true, sessionCookie: sessionCookie || undefined };
         }
 

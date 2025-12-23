@@ -9,7 +9,7 @@ import { Subscription } from 'rxjs';
 import { AppService, ProfilesService, NotificationsService } from 'tabby-core';
 
 import { WarpgateService } from '../services/warpgate.service';
-import { WarpgateProfileProvider } from '../services/warpgate-profile.service';
+import { WarpgateProfileProvider, WarpgateSFTPProfileProvider } from '../services/warpgate-profile.service';
 import {
   WarpgateTarget,
   WarpgateServerConfig,
@@ -17,6 +17,9 @@ import {
   WarpgatePluginConfig,
 } from '../models/warpgate.models';
 import { getBootstrapColor } from '../models/theme.constants';
+import { createLogger } from '../utils/debug-logger';
+
+const log = createLogger('HostsComponent');
 
 /** Host item for display */
 interface HostItem {
@@ -132,7 +135,7 @@ interface HostGroup {
                 <i class="fas fa-server"></i>
               </div>
 
-              <div class="host-info" (click)="connectSsh(host)">
+              <div class="host-info">
                 <div class="host-name">{{ host.target.name }}</div>
                 <div class="host-description text-muted small" *ngIf="host.target.description">
                   {{ host.target.description }}
@@ -145,7 +148,7 @@ interface HostGroup {
               <div class="host-actions">
                 <button
                   class="btn btn-sm btn-primary"
-                  (click)="connectSsh(host); $event.stopPropagation()"
+                  (click)="connectSsh(host)"
                   [disabled]="host.isConnecting"
                   title="Connect SSH"
                 >
@@ -350,6 +353,7 @@ export class WarpgateHostsComponent implements OnInit, OnDestroy {
   constructor(
     @Inject(WarpgateService) private warpgateService: WarpgateService,
     @Inject(WarpgateProfileProvider) private profileProvider: WarpgateProfileProvider,
+    @Inject(WarpgateSFTPProfileProvider) private sftpProfileProvider: WarpgateSFTPProfileProvider,
     @Inject(AppService) private app: AppService,
     @Inject(ProfilesService) private profiles: ProfilesService,
     @Inject(NotificationsService) private notifications: NotificationsService
@@ -381,7 +385,32 @@ export class WarpgateHostsComponent implements OnInit, OnDestroy {
       })
     );
 
-    // Initial load
+    // Ensure servers are connected before initial load
+    // This will trigger the targets$ subscription which calls loadHosts()
+    this.connectServersAndLoad();
+  }
+
+  /**
+   * Connect to all enabled servers and load hosts
+   */
+  private async connectServersAndLoad(): Promise<void> {
+    const servers = this.warpgateService.getServers().filter(s => s.enabled);
+
+    // Connect to any servers that aren't connected yet
+    await Promise.all(
+      servers.map(async server => {
+        if (!this.warpgateService.isConnected(server.id)) {
+          try {
+            await this.warpgateService.connect(server.id);
+          } catch {
+            // Connection errors are handled by the service
+          }
+        }
+      })
+    );
+
+    // Load hosts after ensuring connections
+    // This is redundant with the targets$ subscription but ensures initial load
     this.loadHosts();
   }
 
@@ -509,16 +538,26 @@ export class WarpgateHostsComponent implements OnInit, OnDestroy {
    * Connect to host via SSH
    */
   async connectSsh(host: HostItem): Promise<void> {
+    // Prevent double-click / double connection attempts
+    if (host.isConnecting) {
+      log.debug(` Ignoring duplicate connectSsh call for ${host.target.name}`);
+      return;
+    }
+
+    log.debug(` connectSsh called for ${host.target.name}`);
     host.isConnecting = true;
 
     try {
-      const profile = this.profileProvider.createProfileFromTarget(host.server, host.target);
+      // Create profile with ticket authentication (one-click access)
+      const profile = await this.profileProvider.createOneClickProfile(host.server, host.target);
+      log.debug(` Profile created, auth method: ${profile.options.auth}, username: ${profile.options.user}`);
 
       // Open SSH tab
       await this.profiles.openNewTabForProfile(profile);
 
       this.notifications.info(`Connecting to ${host.target.name}...`);
     } catch (error) {
+      log.error(` Failed to connect:`, error);
       this.notifications.error(
         `Failed to connect: ${error instanceof Error ? error.message : 'Unknown error'}`
       );
@@ -531,34 +570,19 @@ export class WarpgateHostsComponent implements OnInit, OnDestroy {
    * Connect to host via SFTP
    */
   async connectSftp(host: HostItem): Promise<void> {
+    // Prevent double-click / double connection attempts
+    if (host.isConnecting) {
+      log.debug(` Ignoring duplicate connectSftp call for ${host.target.name}`);
+      return;
+    }
+
     host.isConnecting = true;
 
     try {
-      const connectionDetails = this.warpgateService.getSshConnectionDetails(
-        host.server.id,
-        host.target.name
-      );
+      // Create SFTP profile with ticket authentication using the SFTP profile provider
+      const sftpProfile = await this.sftpProfileProvider.createOneClickSftpProfile(host.server, host.target);
 
-      if (!connectionDetails) {
-        throw new Error('Cannot get connection details');
-      }
-
-      // Create SFTP profile
-      const sftpProfile = {
-        id: `warpgate-sftp:${host.server.id}:${host.target.name}`,
-        type: 'ssh',
-        name: `${host.target.name} (SFTP)`,
-        options: {
-          host: connectionDetails.host,
-          port: connectionDetails.port,
-          user: connectionDetails.username,
-          auth: 'password',
-          password: host.server.password,
-        },
-      };
-
-      // Open SFTP panel
-      // Note: This creates an SSH connection with SFTP panel open
+      // Open SFTP tab
       await this.profiles.openNewTabForProfile(sftpProfile as any);
 
       this.notifications.info(`Opening SFTP to ${host.target.name}...`);

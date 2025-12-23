@@ -9,7 +9,7 @@ declare module 'tabby-ssh' {
     host: string;
     port: number;
     user: string;
-    auth?: string;
+    auth?: null|'password'|'publicKey'|'agent'|'keyboardInteractive';
     password?: string;
     privateKeys?: string[];
     keepaliveInterval?: number;
@@ -31,6 +31,7 @@ declare module 'tabby-ssh' {
       cipher?: string[];
       serverHostKey?: string[];
     };
+    input?: any;
   }
 
   export interface SSHProfile extends ConnectableProfile {

@@ -50,6 +50,10 @@ import { WarpgateConfigProvider } from './providers/config.provider';
 import { WarpgateSettingsTabProvider } from './providers/settings-tab.provider';
 import { WarpgateHotkeyProvider } from './providers/hotkey.provider';
 import { WarpgateKeyboardInteractiveHandler } from './providers/warpgate-keyboard-interactive.provider';
+import { WarpgateSshHandler } from './providers/warpgate-ssh-handler.provider';
+import { createLogger } from './utils/debug-logger';
+
+const log = createLogger('Plugin');
 
 /**
  * Warpgate Plugin Module
@@ -76,6 +80,7 @@ import { WarpgateKeyboardInteractiveHandler } from './providers/warpgate-keyboar
     WarpgateProfileProvider,
     WarpgateSFTPProfileProvider,
     WarpgateKeyboardInteractiveHandler,
+    WarpgateSshHandler,
 
     // Configuration provider
     { provide: ConfigProvider, useClass: WarpgateConfigProvider, multi: true },
@@ -99,9 +104,12 @@ import { WarpgateKeyboardInteractiveHandler } from './providers/warpgate-keyboar
   ],
 })
 export default class WarpgateModule {
-  constructor(private warpgateService: WarpgateService) {
-    // Service is initialized via constructor injection
-    console.log('Tabby Warpgate plugin loaded');
+  constructor(
+    private warpgateService: WarpgateService,
+    private sshHandler: WarpgateSshHandler
+  ) {
+    // Services are initialized via constructor injection
+    log.debug('Tabby Warpgate plugin loaded');
   }
 }
 

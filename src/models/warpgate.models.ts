@@ -29,8 +29,28 @@ export interface WarpgateTarget {
   name: string;
   description: string;
   kind: TargetKind;
-  external_host?: string;
   group?: WarpgateGroup;
+}
+
+/** Server info from Warpgate /api/info endpoint */
+export interface WarpgateServerInfo {
+  username: string;
+  version: string;
+  external_host?: string;
+  ports: {
+    ssh: number;
+    http: number;
+    mysql: number;
+    postgres: number;
+  };
+  selected_target: string | null;
+  authorized_via_ticket: boolean;
+  authorized_via_sso_with_single_logout: boolean;
+  own_credential_management_allowed: boolean;
+  setup_state: {
+    has_users: boolean;
+    has_targets: boolean;
+  };
 }
 
 /** Authentication state from Warpgate API */
@@ -57,11 +77,8 @@ export interface WarpgateLoginResponse {
   state?: WarpgateAuthState;
 }
 
-/** User info response */
-export interface WarpgateUserInfo {
-  username: string;
-  roles: string[];
-}
+/** User info response - same as ServerInfo */
+export type WarpgateUserInfo = WarpgateServerInfo;
 
 /** Warpgate server configuration stored by the plugin */
 export interface WarpgateServerConfig {
@@ -94,6 +111,9 @@ export interface WarpgateSshOptions {
   username: string;
 }
 
+/** Authentication method preference */
+export type WarpgateAuthMethod = 'ticket' | 'password' | 'auto';
+
 /** Plugin configuration structure */
 export interface WarpgatePluginConfig {
   servers: WarpgateServerConfig[];
@@ -102,6 +122,10 @@ export interface WarpgatePluginConfig {
   groupByServer: boolean;
   sortBy: 'name' | 'server' | 'kind' | 'group';
   defaultSftpPath: string;
+  /** Preferred authentication method: ticket (one-time tickets), password (keyboard-interactive), or auto (try ticket first) */
+  authMethod: WarpgateAuthMethod;
+  /** Enable debug logging to console */
+  debugMode: boolean;
 }
 
 /** Default plugin configuration */
@@ -112,6 +136,8 @@ export const DEFAULT_WARPGATE_CONFIG: WarpgatePluginConfig = {
   groupByServer: true,
   sortBy: 'name',
   defaultSftpPath: '~',
+  authMethod: 'auto',
+  debugMode: false,
 };
 
 /** API error response */

@@ -3,7 +3,7 @@
  * Adds a toolbar button to quickly access Warpgate hosts
  */
 
-import { Injectable, Inject, Component } from '@angular/core';
+import { Injectable, Inject, Component, Injector } from '@angular/core';
 import {
   ToolbarButtonProvider,
   ToolbarButton,
@@ -18,6 +18,10 @@ import {
 import { WarpgateService } from '../services/warpgate.service';
 import { WarpgateProfileProvider } from '../services/warpgate-profile.service';
 import { WarpgateTarget, WarpgateServerConfig } from '../models/warpgate.models';
+import { WarpgateSshHandler } from '../providers/warpgate-ssh-handler.provider';
+import { createLogger } from '../utils/debug-logger';
+
+const log = createLogger('Toolbar');
 
 /**
  * Selector option for Warpgate hosts
@@ -39,7 +43,9 @@ export class WarpgateToolbarButtonProvider extends ToolbarButtonProvider {
     @Inject(AppService) private app: AppService,
     @Inject(SelectorService) private selector: SelectorService,
     @Inject(NotificationsService) private notifications: NotificationsService,
-    @Inject(ProfilesService) private profiles: ProfilesService
+    @Inject(ProfilesService) private profiles: ProfilesService,
+    @Inject(WarpgateSshHandler) private sshHandler: WarpgateSshHandler,
+    private injector: Injector
   ) {
     super();
   }
@@ -143,11 +149,38 @@ export class WarpgateToolbarButtonProvider extends ToolbarButtonProvider {
 
   /**
    * Connect to SSH
+   * Uses createOneClickProfile to ensure tickets are created when available
    */
   private async connectSsh(server: WarpgateServerConfig, target: WarpgateTarget): Promise<void> {
     try {
-      const profile = this.profileProvider.createProfileFromTarget(server, target);
+      // Use createOneClickProfile which creates tickets for TOTP-enabled servers
+      const profile = await this.profileProvider.createOneClickProfile(server, target);
+
+      // Debug: Check if warpgate metadata is set
+      log.debug(' Created profile:', {
+        id: profile.id,
+        hasWarpgate: Boolean(profile.warpgate),
+        warpgate: profile.warpgate,
+        auth: profile.options?.auth,
+      });
+
+      // Register the full profile so the SSH handler can access metadata
+      this.sshHandler.registerWarpgateProfile(profile);
+
       await this.profiles.openNewTabForProfile(profile);
+
+      // Try to find and attach to the tab immediately (for faster attachment)
+      // The tabOpened$ event will also fire, but this gives us a head start
+      const tab = this.app.tabs?.find(t => t?.profile?.id === profile.id);
+      if (tab) {
+        log.debug(' Found tab after opening:', {
+          profileId: tab.profile?.id,
+          hasWarpgate: Boolean((tab.profile as any)?.warpgate),
+          warpgate: (tab.profile as any)?.warpgate,
+        });
+        log.debug(` Found tab immediately, attaching SSH handler`);
+        this.sshHandler.attachToTab(tab);
+      }
     } catch (error) {
       this.notifications.error(
         `Failed to connect: ${error instanceof Error ? error.message : 'Unknown error'}`
@@ -157,30 +190,14 @@ export class WarpgateToolbarButtonProvider extends ToolbarButtonProvider {
 
   /**
    * Connect to SFTP
+   * Uses createOneClickSftpProfile to ensure tickets are created when available
    */
   private async connectSftp(server: WarpgateServerConfig, target: WarpgateTarget): Promise<void> {
     try {
-      const connectionDetails = this.warpgateService.getSshConnectionDetails(
-        server.id,
-        target.name
-      );
-
-      if (!connectionDetails) {
-        throw new Error('Cannot get connection details');
-      }
-
-      const sftpProfile = {
-        id: `warpgate-sftp:${server.id}:${target.name}`,
-        type: 'ssh',
-        name: `${target.name} (SFTP)`,
-        options: {
-          host: connectionDetails.host,
-          port: connectionDetails.port,
-          user: connectionDetails.username,
-          auth: 'password',
-          password: server.password,
-        },
-      };
+      // Use the SFTP profile provider's one-click method which creates tickets
+      const { WarpgateSFTPProfileProvider } = await import('../services/warpgate-profile.service');
+      const sftpProvider = this.injector.get(WarpgateSFTPProfileProvider);
+      const sftpProfile = await sftpProvider.createOneClickSftpProfile(server, target);
 
       await this.profiles.openNewTabForProfile(sftpProfile as any);
     } catch (error) {

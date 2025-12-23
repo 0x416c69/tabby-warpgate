@@ -107,6 +107,9 @@ declare module 'tabby-core' {
   export class AppService {
     openNewTab(tab: any): void;
     openNewTabRaw(params: NewTabParameters<any>): void;
+    tabs: any[];
+    tabOpened$: import('rxjs').Observable<any>;
+    tabClosed$: import('rxjs').Observable<any>;
   }
 
   export class ProfilesService {

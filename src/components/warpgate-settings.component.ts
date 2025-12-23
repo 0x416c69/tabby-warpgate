@@ -355,6 +355,36 @@ interface ServerFormState {
             Initial directory path when opening SFTP sessions
           </small>
         </div>
+
+        <div class="form-group">
+          <label>Authentication Method</label>
+          <select class="form-control" [(ngModel)]="config.authMethod" (ngModelChange)="savePluginConfig()">
+            <option value="auto">Auto (prefer tickets, fallback to password)</option>
+            <option value="ticket">Tickets only (one-time use tokens)</option>
+            <option value="password">Password only (keyboard-interactive)</option>
+          </select>
+          <small class="form-text text-muted">
+            <strong>Auto:</strong> Tries to create a one-time ticket first, falls back to password if ticket creation fails.<br>
+            <strong>Tickets:</strong> Uses Warpgate tickets for authentication. Requires admin access to create tickets.<br>
+            <strong>Password:</strong> Uses keyboard-interactive authentication with password (and OTP if required by server).
+          </small>
+        </div>
+
+        <div class="form-check mb-3">
+          <input
+            type="checkbox"
+            class="form-check-input"
+            id="debugMode"
+            [(ngModel)]="config.debugMode"
+            (ngModelChange)="savePluginConfig()"
+          />
+          <label class="form-check-label" for="debugMode">
+            Enable debug logging
+          </label>
+          <small class="form-text text-muted d-block">
+            Log detailed debug messages to the developer console (useful for troubleshooting)
+          </small>
+        </div>
       </div>
 
       <!-- Actions -->
@@ -673,7 +703,18 @@ export class WarpgateSettingsComponent implements OnInit, OnDestroy {
   }
 
   savePluginConfig(): void {
-    this.warpgateService.saveConfig(this.config);
+    // Only save the plugin settings, NOT the servers array
+    // Servers are managed separately via addServer/updateServer/removeServer
+    // Passing the full config object would overwrite servers with stale data
+    this.warpgateService.saveConfig({
+      autoRefreshInterval: this.config.autoRefreshInterval,
+      showOfflineServers: this.config.showOfflineServers,
+      groupByServer: this.config.groupByServer,
+      sortBy: this.config.sortBy,
+      defaultSftpPath: this.config.defaultSftpPath,
+      authMethod: this.config.authMethod,
+      debugMode: this.config.debugMode,
+    });
   }
 
   isServerConnected(serverId: string): boolean {
