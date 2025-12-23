@@ -30,8 +30,12 @@ const mockInjector = {
 
 describe('WarpgateService', () => {
   let service: WarpgateService;
+  let consoleErrorSpy: jest.SpyInstance;
 
   beforeEach(() => {
+    // Suppress console.error from debug logger during tests
+    consoleErrorSpy = jest.spyOn(console, 'error').mockImplementation(() => {});
+
     // Reset config
     mockConfigService.store.warpgate = { ...DEFAULT_WARPGATE_CONFIG };
     mockConfigService.save.mockClear();
@@ -45,6 +49,12 @@ describe('WarpgateService', () => {
       mockPlatformService as any,
       mockInjector as any
     );
+  });
+
+  afterEach(() => {
+    // Clean up service to avoid async leaks
+    service.destroy();
+    consoleErrorSpy.mockRestore();
   });
 
   describe('getConfig', () => {
@@ -253,6 +263,102 @@ describe('WarpgateService', () => {
     it('should return null for unknown server', () => {
       const details = service.getSshConnectionDetails('unknown', 'target');
       expect(details).toBeNull();
+    });
+
+    it('should use external_host from server info when available', async () => {
+      // Add a server with enabled: false to avoid network calls
+      const server = await service.addServer({
+        url: 'https://warpgate.example.com',
+        username: 'admin',
+        password: 'pass123',
+        name: 'Test Server',
+        enabled: false,
+      });
+
+      // Mock the client with all required methods
+      // external_host is returned in getUserInfo, not in targets
+      const mockClient = {
+        getSshHost: jest.fn().mockReturnValue('warpgate.example.com'),
+        getSshPort: jest.fn().mockReturnValue(2222),
+        login: jest.fn().mockResolvedValue({ success: true }),
+        logout: jest.fn().mockResolvedValue({ success: true }),
+        hasSession: jest.fn().mockReturnValue(true),
+        getUserInfo: jest.fn().mockResolvedValue({
+          success: true,
+          data: {
+            username: 'admin',
+            external_host: 'prod.external.com', // external_host comes from server info
+          }
+        }),
+        getSshTargets: jest.fn().mockResolvedValue({
+          success: true,
+          data: [
+            {
+              name: 'prod-server',
+              description: 'Production server',
+              kind: 'Ssh' as const,
+            },
+          ],
+        }),
+      };
+
+      (service as any).clients.set(server.id, mockClient);
+
+      // Fetch targets to populate the targets map and server info
+      await service.refreshTargets(server.id);
+
+      // Get connection details
+      const details = service.getSshConnectionDetails(server.id, 'prod-server');
+
+      // Should use external_host from server info instead of Warpgate server host
+      expect(details).not.toBeNull();
+      expect(details?.host).toBe('prod.external.com');
+      expect(details?.port).toBe(2222);
+    });
+
+    it('should fall back to Warpgate server host when external_host is not available', async () => {
+      // Add a server with enabled: false to avoid network calls
+      const server = await service.addServer({
+        url: 'https://warpgate.example.com',
+        username: 'admin',
+        password: 'pass123',
+        name: 'Test Server',
+        enabled: false,
+      });
+
+      // Mock the client with all required methods
+      const mockClient = {
+        getSshHost: jest.fn().mockReturnValue('warpgate.example.com'),
+        getSshPort: jest.fn().mockReturnValue(2222),
+        login: jest.fn().mockResolvedValue({ success: true }),
+        logout: jest.fn().mockResolvedValue({ success: true }),
+        hasSession: jest.fn().mockReturnValue(true),
+        getUserInfo: jest.fn().mockResolvedValue({ success: true, data: { username: 'admin' } }),
+        getSshTargets: jest.fn().mockResolvedValue({
+          success: true,
+          data: [
+            {
+              name: 'dev-server',
+              description: 'Development server',
+              kind: 'Ssh' as const,
+              // No external_host provided
+            },
+          ],
+        }),
+      };
+
+      (service as any).clients.set(server.id, mockClient);
+
+      // Fetch targets to populate the targets map
+      await service.refreshTargets(server.id);
+
+      // Get connection details
+      const details = service.getSshConnectionDetails(server.id, 'dev-server');
+
+      // Should fall back to Warpgate server host
+      expect(details).not.toBeNull();
+      expect(details?.host).toBe('warpgate.example.com');
+      expect(details?.port).toBe(2222);
     });
   });
 

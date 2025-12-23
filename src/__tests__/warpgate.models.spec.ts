@@ -26,6 +26,8 @@ describe('Warpgate Models', () => {
         groupByServer: true,
         sortBy: 'name',
         defaultSftpPath: '~',
+        authMethod: 'auto',
+        debugMode: false,
       });
     });
 
@@ -80,7 +82,6 @@ describe('Warpgate Models', () => {
         name: 'production-server',
         description: 'Production application server',
         kind: 'Ssh',
-        external_host: 'prod.example.com',
         group: {
           id: 'group-1',
           name: 'Production',
@@ -91,7 +92,6 @@ describe('Warpgate Models', () => {
       expect(target.name).toBe('production-server');
       expect(target.description).toBe('Production application server');
       expect(target.kind).toBe('Ssh');
-      expect(target.external_host).toBe('prod.example.com');
       expect(target.group?.name).toBe('Production');
       expect(target.group?.color).toBe('success');
     });
@@ -191,6 +191,8 @@ describe('Warpgate Models', () => {
         groupByServer: false,
         sortBy: 'group',
         defaultSftpPath: '/home/user',
+        authMethod: 'auto',
+        debugMode: false,
       };
 
       expect(config.servers).toHaveLength(1);
@@ -199,6 +201,7 @@ describe('Warpgate Models', () => {
       expect(config.groupByServer).toBe(false);
       expect(config.sortBy).toBe('group');
       expect(config.defaultSftpPath).toBe('/home/user');
+      expect(config.authMethod).toBe('auto');
     });
 
     it('should support all sort options', () => {

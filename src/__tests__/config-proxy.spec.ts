@@ -49,8 +49,12 @@ describe('Config Proxy Compatibility Tests', () => {
   let configStore: ReturnType<typeof createTabbyConfigProxy>;
   let mockConfigService: any;
   let service: WarpgateService;
+  let consoleErrorSpy: jest.SpyInstance;
 
   beforeEach(() => {
+    // Suppress console.error from debug logger during tests
+    consoleErrorSpy = jest.spyOn(console, 'error').mockImplementation(() => {});
+
     configStore = createTabbyConfigProxy();
     mockConfigService = {
       store: configStore,
@@ -67,6 +71,7 @@ describe('Config Proxy Compatibility Tests', () => {
 
   afterEach(() => {
     service.destroy();
+    consoleErrorSpy.mockRestore();
   });
 
   describe('Array Modification Tests', () => {
