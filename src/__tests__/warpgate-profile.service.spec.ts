@@ -2,7 +2,7 @@
  * Unit tests for WarpgateProfileProvider
  */
 
-import { WarpgateProfileProvider, WarpgateSFTPProfileProvider } from '../services/warpgate-profile.service';
+import { WarpgateProfileProvider } from '../services/warpgate-profile.service';
 import { WarpgateService } from '../services/warpgate.service';
 import { WarpgateServerConfig, WarpgateTarget, DEFAULT_WARPGATE_CONFIG } from '../models/warpgate.models';
 
@@ -205,117 +205,6 @@ describe('WarpgateProfileProvider', () => {
 
       // Should not throw
       expect(() => provider.deleteProfile(profile)).not.toThrow();
-    });
-  });
-});
-
-describe('WarpgateSFTPProfileProvider', () => {
-  let provider: WarpgateSFTPProfileProvider;
-  let mockService: ReturnType<typeof createMockWarpgateService>;
-
-  const mockServer: WarpgateServerConfig = {
-    id: 'server-1',
-    name: 'Test Server',
-    url: 'https://warpgate.example.com',
-    username: 'testuser',
-    password: 'testpass',
-    enabled: true,
-  };
-
-  const mockTarget: WarpgateTarget = {
-    name: 'file-server',
-    description: 'File storage server',
-    kind: 'Ssh',
-  };
-
-  beforeEach(() => {
-    mockService = createMockWarpgateService();
-    provider = new WarpgateSFTPProfileProvider(mockService as unknown as WarpgateService);
-  });
-
-  describe('provider properties', () => {
-    it('should have correct id', () => {
-      expect(provider.id).toBe('warpgate-sftp');
-    });
-
-    it('should have correct name', () => {
-      expect(provider.name).toBe('Warpgate SFTP');
-    });
-
-    it('should not support quick connect', () => {
-      expect(provider.supportsQuickConnect).toBe(false);
-    });
-  });
-
-  describe('getBuiltinProfiles', () => {
-    it('should return SFTP profiles for SSH targets', async () => {
-      mockService.getAllTargets.mockReturnValue([
-        { server: mockServer, target: mockTarget },
-      ]);
-
-      const profiles = await provider.getBuiltinProfiles();
-
-      expect(profiles).toHaveLength(1);
-      expect(profiles[0].type).toBe('sftp');
-      expect(profiles[0].name).toBe('file-server (SFTP)');
-    });
-
-    it('should skip targets without connection details', async () => {
-      mockService.getAllTargets.mockReturnValue([
-        { server: mockServer, target: mockTarget },
-      ]);
-      mockService.getSshConnectionDetails.mockReturnValue(null);
-
-      const profiles = await provider.getBuiltinProfiles();
-
-      expect(profiles).toHaveLength(0);
-    });
-
-    it('should use default SFTP path from config', async () => {
-      mockService.getAllTargets.mockReturnValue([
-        { server: mockServer, target: mockTarget },
-      ]);
-      mockService.getConfig.mockReturnValue({
-        ...DEFAULT_WARPGATE_CONFIG,
-        defaultSftpPath: '/home/user',
-      });
-
-      const profiles = await provider.getBuiltinProfiles();
-
-      expect(profiles[0].options.initialPath).toBe('/home/user');
-    });
-  });
-
-  describe('getSuggestedName', () => {
-    it('should append (SFTP) to target name', () => {
-      const profile = {
-        warpgate: { targetName: 'file-server' },
-        type: 'sftp',
-      };
-      const name = provider.getSuggestedName(profile as any);
-
-      expect(name).toBe('file-server (SFTP)');
-    });
-  });
-
-  describe('getDescription', () => {
-    it('should mention SFTP via Warpgate', () => {
-      const profile = {
-        warpgate: { serverName: 'Test Server' },
-        type: 'sftp',
-      };
-      const description = provider.getDescription(profile as any);
-
-      expect(description).toBe('SFTP via Warpgate: Test Server');
-    });
-  });
-
-  describe('getNewTabParameters', () => {
-    it('should return SFTP tab parameters', async () => {
-      const profile = { id: 'test', type: 'sftp', name: 'Test' };
-      const params = await provider.getNewTabParameters(profile as any);
-
-      expect(params.type).toBe('sftp-tab');
     });
   });
 });

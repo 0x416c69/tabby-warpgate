@@ -1,7 +1,7 @@
 /**
  * Warpgate Hosts Component
  * Displays a list of available SSH hosts from all connected Warpgate servers
- * Provides one-click SSH and SFTP connections
+ * Provides one-click SSH connections
  */
 
 import { Component, OnInit, OnDestroy, Inject } from '@angular/core';
@@ -9,7 +9,7 @@ import { Subscription } from 'rxjs';
 import { AppService, ProfilesService, NotificationsService } from 'tabby-core';
 
 import { WarpgateService } from '../services/warpgate.service';
-import { WarpgateProfileProvider, WarpgateSFTPProfileProvider } from '../services/warpgate-profile.service';
+import { WarpgateProfileProvider } from '../services/warpgate-profile.service';
 import {
   WarpgateTarget,
   WarpgateServerConfig,
@@ -154,15 +154,6 @@ interface HostGroup {
                 >
                   <i class="fas" [class.fa-terminal]="!host.isConnecting" [class.fa-spinner]="host.isConnecting" [class.fa-spin]="host.isConnecting"></i>
                   SSH
-                </button>
-                <button
-                  class="btn btn-sm btn-outline-secondary ms-1"
-                  (click)="connectSftp(host); $event.stopPropagation()"
-                  [disabled]="host.isConnecting"
-                  title="Open SFTP"
-                >
-                  <i class="fas fa-folder"></i>
-                  SFTP
                 </button>
               </div>
             </div>
@@ -353,7 +344,6 @@ export class WarpgateHostsComponent implements OnInit, OnDestroy {
   constructor(
     @Inject(WarpgateService) private warpgateService: WarpgateService,
     @Inject(WarpgateProfileProvider) private profileProvider: WarpgateProfileProvider,
-    @Inject(WarpgateSFTPProfileProvider) private sftpProfileProvider: WarpgateSFTPProfileProvider,
     @Inject(AppService) private app: AppService,
     @Inject(ProfilesService) private profiles: ProfilesService,
     @Inject(NotificationsService) private notifications: NotificationsService
@@ -560,35 +550,6 @@ export class WarpgateHostsComponent implements OnInit, OnDestroy {
       log.error(` Failed to connect:`, error);
       this.notifications.error(
         `Failed to connect: ${error instanceof Error ? error.message : 'Unknown error'}`
-      );
-    } finally {
-      host.isConnecting = false;
-    }
-  }
-
-  /**
-   * Connect to host via SFTP
-   */
-  async connectSftp(host: HostItem): Promise<void> {
-    // Prevent double-click / double connection attempts
-    if (host.isConnecting) {
-      log.debug(` Ignoring duplicate connectSftp call for ${host.target.name}`);
-      return;
-    }
-
-    host.isConnecting = true;
-
-    try {
-      // Create SFTP profile with ticket authentication using the SFTP profile provider
-      const sftpProfile = await this.sftpProfileProvider.createOneClickSftpProfile(host.server, host.target);
-
-      // Open SFTP tab
-      await this.profiles.openNewTabForProfile(sftpProfile as any);
-
-      this.notifications.info(`Opening SFTP to ${host.target.name}...`);
-    } catch (error) {
-      this.notifications.error(
-        `Failed to open SFTP: ${error instanceof Error ? error.message : 'Unknown error'}`
       );
     } finally {
       host.isConnecting = false;

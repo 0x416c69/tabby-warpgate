@@ -343,20 +343,6 @@ interface ServerFormState {
         </div>
 
         <div class="form-group">
-          <label>Default SFTP Path</label>
-          <input
-            type="text"
-            class="form-control"
-            [(ngModel)]="config.defaultSftpPath"
-            (ngModelChange)="savePluginConfig()"
-            placeholder="~"
-          />
-          <small class="form-text text-muted">
-            Initial directory path when opening SFTP sessions
-          </small>
-        </div>
-
-        <div class="form-group">
           <label>Authentication Method</label>
           <select class="form-control" [(ngModel)]="config.authMethod" (ngModelChange)="savePluginConfig()">
             <option value="auto">Auto (prefer tickets, fallback to password)</option>
@@ -711,7 +697,6 @@ export class WarpgateSettingsComponent implements OnInit, OnDestroy {
       showOfflineServers: this.config.showOfflineServers,
       groupByServer: this.config.groupByServer,
       sortBy: this.config.sortBy,
-      defaultSftpPath: this.config.defaultSftpPath,
       authMethod: this.config.authMethod,
       debugMode: this.config.debugMode,
     });

@@ -2,13 +2,12 @@
  * Tabby Warpgate Plugin
  *
  * A comprehensive Warpgate SSH gateway integration for Tabby terminal.
- * Provides one-click SSH and SFTP connections to hosts through Warpgate.
+ * Provides one-click SSH connections to hosts through Warpgate.
  *
  * Features:
  * - Multiple Warpgate server support
  * - Automatic authentication and session management
  * - One-click SSH connections to any Warpgate target
- * - SFTP file browser integration
  * - Host grouping and search
  * - Auto-refresh of host lists
  * - Toolbar quick access button
@@ -31,10 +30,7 @@ import TabbySettingsModule, { SettingsTabProvider } from 'tabby-settings';
 
 // Services
 import { WarpgateService } from './services/warpgate.service';
-import {
-  WarpgateProfileProvider,
-  WarpgateSFTPProfileProvider,
-} from './services/warpgate-profile.service';
+import { WarpgateProfileProvider } from './services/warpgate-profile.service';
 
 // Components
 import { WarpgateSettingsComponent } from './components/warpgate-settings.component';
@@ -78,7 +74,6 @@ const log = createLogger('Plugin');
     // Core services
     WarpgateService,
     WarpgateProfileProvider,
-    WarpgateSFTPProfileProvider,
     WarpgateKeyboardInteractiveHandler,
     WarpgateSshHandler,
 
@@ -96,7 +91,6 @@ const log = createLogger('Plugin');
 
     // Profile providers
     { provide: ProfileProvider, useExisting: WarpgateProfileProvider, multi: true },
-    { provide: ProfileProvider, useExisting: WarpgateSFTPProfileProvider, multi: true },
   ],
   exports: [
     WarpgateHostsComponent,

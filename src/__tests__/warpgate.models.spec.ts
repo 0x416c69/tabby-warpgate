@@ -25,7 +25,6 @@ describe('Warpgate Models', () => {
         showOfflineServers: true,
         groupByServer: true,
         sortBy: 'name',
-        defaultSftpPath: '~',
         authMethod: 'auto',
         debugMode: false,
       });
@@ -190,7 +189,6 @@ describe('Warpgate Models', () => {
         showOfflineServers: false,
         groupByServer: false,
         sortBy: 'group',
-        defaultSftpPath: '/home/user',
         authMethod: 'auto',
         debugMode: false,
       };
@@ -200,7 +198,6 @@ describe('Warpgate Models', () => {
       expect(config.showOfflineServers).toBe(false);
       expect(config.groupByServer).toBe(false);
       expect(config.sortBy).toBe('group');
-      expect(config.defaultSftpPath).toBe('/home/user');
       expect(config.authMethod).toBe('auto');
     });
 

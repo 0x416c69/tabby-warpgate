@@ -168,9 +168,6 @@ export class WarpgateService {
       if (pluginConfig.sortBy !== undefined) {
         warpgateConfig.sortBy = pluginConfig.sortBy;
       }
-      if (pluginConfig.defaultSftpPath !== undefined) {
-        warpgateConfig.defaultSftpPath = pluginConfig.defaultSftpPath;
-      }
       if (pluginConfig.authMethod !== undefined) {
         warpgateConfig.authMethod = pluginConfig.authMethod;
       }

@@ -121,7 +121,6 @@ export interface WarpgatePluginConfig {
   showOfflineServers: boolean;
   groupByServer: boolean;
   sortBy: 'name' | 'server' | 'kind' | 'group';
-  defaultSftpPath: string;
   /** Preferred authentication method: ticket (one-time tickets), password (keyboard-interactive), or auto (try ticket first) */
   authMethod: WarpgateAuthMethod;
   /** Enable debug logging to console */
@@ -135,7 +134,6 @@ export const DEFAULT_WARPGATE_CONFIG: WarpgatePluginConfig = {
   showOfflineServers: true,
   groupByServer: true,
   sortBy: 'name',
-  defaultSftpPath: '~',
   authMethod: 'auto',
   debugMode: false,
 };

@@ -3,7 +3,7 @@
  * Adds a toolbar button to quickly access Warpgate hosts
  */
 
-import { Injectable, Inject, Component, Injector } from '@angular/core';
+import { Injectable, Inject, Component } from '@angular/core';
 import {
   ToolbarButtonProvider,
   ToolbarButton,
@@ -29,7 +29,6 @@ const log = createLogger('Toolbar');
 interface WarpgateHostOption extends SelectorOption<void> {
   server: WarpgateServerConfig;
   target: WarpgateTarget;
-  type: 'ssh' | 'sftp';
 }
 
 /**
@@ -44,8 +43,7 @@ export class WarpgateToolbarButtonProvider extends ToolbarButtonProvider {
     @Inject(SelectorService) private selector: SelectorService,
     @Inject(NotificationsService) private notifications: NotificationsService,
     @Inject(ProfilesService) private profiles: ProfilesService,
-    @Inject(WarpgateSshHandler) private sshHandler: WarpgateSshHandler,
-    private injector: Injector
+    @Inject(WarpgateSshHandler) private sshHandler: WarpgateSshHandler
   ) {
     super();
   }
@@ -87,19 +85,7 @@ export class WarpgateToolbarButtonProvider extends ToolbarButtonProvider {
         icon: 'fas fa-terminal',
         server,
         target,
-        type: 'ssh',
         callback: () => this.connectSsh(server, target),
-      });
-
-      // Add SFTP option
-      options.push({
-        name: `${target.name} (SFTP)`,
-        description: `SFTP via ${server.name}`,
-        icon: 'fas fa-folder',
-        server,
-        target,
-        type: 'sftp',
-        callback: () => this.connectSftp(server, target),
       });
     }
 
@@ -188,24 +174,6 @@ export class WarpgateToolbarButtonProvider extends ToolbarButtonProvider {
     }
   }
 
-  /**
-   * Connect to SFTP
-   * Uses createOneClickSftpProfile to ensure tickets are created when available
-   */
-  private async connectSftp(server: WarpgateServerConfig, target: WarpgateTarget): Promise<void> {
-    try {
-      // Use the SFTP profile provider's one-click method which creates tickets
-      const { WarpgateSFTPProfileProvider } = await import('../services/warpgate-profile.service');
-      const sftpProvider = this.injector.get(WarpgateSFTPProfileProvider);
-      const sftpProfile = await sftpProvider.createOneClickSftpProfile(server, target);
-
-      await this.profiles.openNewTabForProfile(sftpProfile as any);
-    } catch (error) {
-      this.notifications.error(
-        `Failed to open SFTP: ${error instanceof Error ? error.message : 'Unknown error'}`
-      );
-    }
-  }
 }
 
 /**
