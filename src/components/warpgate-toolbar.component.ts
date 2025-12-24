@@ -7,29 +7,10 @@ import { Injectable, Inject, Component } from '@angular/core';
 import {
   ToolbarButtonProvider,
   ToolbarButton,
-  SplitTabComponent,
   AppService,
-  SelectorOption,
-  SelectorService,
-  NotificationsService,
-  ProfilesService,
 } from 'tabby-core';
 
-import { WarpgateService } from '../services/warpgate.service';
-import { WarpgateProfileProvider } from '../services/warpgate-profile.service';
-import { WarpgateTarget, WarpgateServerConfig } from '../models/warpgate.models';
-import { WarpgateSshHandler } from '../providers/warpgate-ssh-handler.provider';
-import { createLogger } from '../utils/debug-logger';
-
-const log = createLogger('Toolbar');
-
-/**
- * Selector option for Warpgate hosts
- */
-interface WarpgateHostOption extends SelectorOption<void> {
-  server: WarpgateServerConfig;
-  target: WarpgateTarget;
-}
+import { WarpgateHostsTabComponent } from './warpgate-hosts-tab.component';
 
 /**
  * Toolbar Button Provider for Warpgate
@@ -37,13 +18,7 @@ interface WarpgateHostOption extends SelectorOption<void> {
 @Injectable()
 export class WarpgateToolbarButtonProvider extends ToolbarButtonProvider {
   constructor(
-    @Inject(WarpgateService) private warpgateService: WarpgateService,
-    @Inject(WarpgateProfileProvider) private profileProvider: WarpgateProfileProvider,
-    @Inject(AppService) private app: AppService,
-    @Inject(SelectorService) private selector: SelectorService,
-    @Inject(NotificationsService) private notifications: NotificationsService,
-    @Inject(ProfilesService) private profiles: ProfilesService,
-    @Inject(WarpgateSshHandler) private sshHandler: WarpgateSshHandler
+    @Inject(AppService) private app: AppService
   ) {
     super();
   }
@@ -56,124 +31,32 @@ export class WarpgateToolbarButtonProvider extends ToolbarButtonProvider {
         title: 'Warpgate Hosts',
         weight: 5,
         click: async () => {
-          await this.showHostSelector();
+          this.openHostsTab();
         },
       },
     ];
   }
 
   /**
-   * Show host selector modal
+   * Open the Warpgate Hosts panel as a new tab
    */
-  private async showHostSelector(): Promise<void> {
-    const allTargets = this.warpgateService.getAllTargets();
+  private openHostsTab(): void {
+    // Check if a hosts tab is already open
+    const existingTab = this.app.tabs.find(
+      (tab: any) => tab instanceof WarpgateHostsTabComponent
+    );
 
-    if (allTargets.length === 0) {
-      this.notifications.notice(
-        'No Warpgate hosts available. Configure servers in Settings > Warpgate.'
-      );
+    if (existingTab) {
+      // Focus existing tab instead of opening new one
+      this.app.selectTab(existingTab);
       return;
     }
 
-    const options: WarpgateHostOption[] = [];
-
-    for (const { server, target } of allTargets) {
-      // Add SSH option
-      options.push({
-        name: target.name,
-        description: `SSH via ${server.name}${target.description ? ` - ${target.description}` : ''}`,
-        icon: 'fas fa-terminal',
-        server,
-        target,
-        callback: () => this.connectSsh(server, target),
-      });
-    }
-
-    // Group by server
-    const groupedOptions = this.groupOptionsByServer(options);
-
-    await this.selector.show(
-      'Connect to Warpgate Host',
-      groupedOptions,
-      {
-        routedInputEnabled: true,
-      }
-    );
+    // Open new hosts tab
+    this.app.openNewTab({
+      type: WarpgateHostsTabComponent,
+    });
   }
-
-  /**
-   * Group options by server
-   */
-  private groupOptionsByServer(options: WarpgateHostOption[]): SelectorOption<void>[] {
-    const serverGroups = new Map<string, WarpgateHostOption[]>();
-
-    for (const option of options) {
-      const serverId = option.server.id;
-      if (!serverGroups.has(serverId)) {
-        serverGroups.set(serverId, []);
-      }
-      serverGroups.get(serverId)!.push(option);
-    }
-
-    const result: SelectorOption<void>[] = [];
-
-    for (const [, serverOptions] of serverGroups) {
-      if (serverOptions.length > 0) {
-        // Add server header
-        result.push({
-          name: serverOptions[0].server.name,
-          isGroup: true,
-        });
-
-        // Add options for this server
-        result.push(...serverOptions);
-      }
-    }
-
-    return result;
-  }
-
-  /**
-   * Connect to SSH
-   * Uses createOneClickProfile to ensure tickets are created when available
-   */
-  private async connectSsh(server: WarpgateServerConfig, target: WarpgateTarget): Promise<void> {
-    try {
-      // Use createOneClickProfile which creates tickets for TOTP-enabled servers
-      const profile = await this.profileProvider.createOneClickProfile(server, target);
-
-      // Debug: Check if warpgate metadata is set
-      log.debug(' Created profile:', {
-        id: profile.id,
-        hasWarpgate: Boolean(profile.warpgate),
-        warpgate: profile.warpgate,
-        auth: profile.options?.auth,
-      });
-
-      // Register the full profile so the SSH handler can access metadata
-      this.sshHandler.registerWarpgateProfile(profile);
-
-      await this.profiles.openNewTabForProfile(profile);
-
-      // Try to find and attach to the tab immediately (for faster attachment)
-      // The tabOpened$ event will also fire, but this gives us a head start
-      const tab = this.app.tabs?.find(t => t?.profile?.id === profile.id);
-      if (tab) {
-        log.debug(' Found tab after opening:', {
-          profileId: tab.profile?.id,
-          hasWarpgate: Boolean((tab.profile as any)?.warpgate),
-          warpgate: (tab.profile as any)?.warpgate,
-        });
-        log.debug(` Found tab immediately, attaching SSH handler`);
-        this.sshHandler.attachToTab(tab);
-      }
-    } catch (error) {
-      this.notifications.error(
-        `Failed to connect: ${error instanceof Error ? error.message : 'Unknown error'}`
-      );
-    }
-  }
-
 }
 
 /**

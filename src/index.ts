@@ -35,6 +35,7 @@ import { WarpgateProfileProvider } from './services/warpgate-profile.service';
 // Components
 import { WarpgateSettingsComponent } from './components/warpgate-settings.component';
 import { WarpgateHostsComponent } from './components/warpgate-hosts.component';
+import { WarpgateHostsTabComponent } from './components/warpgate-hosts-tab.component';
 import {
   WarpgateToolbarButtonProvider,
   WarpgateDockComponent,
@@ -67,6 +68,7 @@ const log = createLogger('Plugin');
   declarations: [
     WarpgateSettingsComponent,
     WarpgateHostsComponent,
+    WarpgateHostsTabComponent,
     WarpgateDockComponent,
     WarpgateOtpModalComponent,
   ],

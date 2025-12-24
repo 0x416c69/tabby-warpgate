@@ -29,8 +29,12 @@ declare module 'tabby-core' {
   };
 
   export interface NewTabParameters<T = any> {
-    type: string;
+    type: string | TabComponentType<any>;
     inputs?: T;
+  }
+
+  export interface TabComponentType<T extends BaseTabComponent> {
+    new (...args: any[]): T;
   }
 
   export abstract class ProfileProvider<P extends Profile = Profile> {
@@ -105,11 +109,32 @@ declare module 'tabby-core' {
   }
 
   export class AppService {
-    openNewTab(tab: any): void;
-    openNewTabRaw(params: NewTabParameters<any>): void;
-    tabs: any[];
+    openNewTab<T extends BaseTabComponent>(params: NewTabParameters<T>): T;
+    openNewTabRaw<T extends BaseTabComponent>(params: NewTabParameters<T>): T;
+    selectTab(tab: BaseTabComponent | null): void;
+    tabs: BaseTabComponent[];
+    activeTab: BaseTabComponent | null;
     tabOpened$: import('rxjs').Observable<any>;
     tabClosed$: import('rxjs').Observable<any>;
+  }
+
+  export class TabsService {
+    create<T extends BaseTabComponent>(params: NewTabParameters<T>): T;
+  }
+
+  export abstract class BaseTabComponent {
+    title: string;
+    icon: string | null;
+    hasFocus: boolean;
+    customTitle: string;
+    hostView: any;
+    destroyed$: import('rxjs').Observable<void>;
+
+    constructor(injector: import('@angular/core').Injector);
+
+    setTitle(title: string): void;
+    destroy(): void;
+    getRecoveryToken(): Promise<any>;
   }
 
   export class ProfilesService {

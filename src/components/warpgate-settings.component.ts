@@ -205,85 +205,98 @@ interface ServerFormState {
         <!-- Server List -->
         <div class="server-list">
           <div
-            class="server-item card mb-2"
+            class="server-card"
             *ngFor="let server of servers"
             [class.disabled]="!server.enabled"
+            [class.connected]="isServerConnected(server.id)"
           >
-            <div class="card-body d-flex align-items-center">
-              <div class="server-status me-3">
-                <i
-                  class="fas fa-circle"
-                  [class.text-success]="isServerConnected(server.id)"
-                  [class.text-danger]="!isServerConnected(server.id) && server.enabled"
-                  [class.text-muted]="!server.enabled"
-                ></i>
-              </div>
+            <!-- Status indicator -->
+            <div class="server-status-dot"
+                 [class.online]="isServerConnected(server.id)"
+                 [class.offline]="!isServerConnected(server.id) && server.enabled"
+                 [class.paused]="!server.enabled">
+            </div>
 
-              <div class="server-info flex-grow-1">
-                <div class="server-name fw-bold">{{ server.name }}</div>
-                <div class="server-url text-muted small">{{ server.url }}</div>
-                <div class="server-user text-muted small">
+            <!-- Server avatar -->
+            <div class="server-avatar" [class.active]="isServerConnected(server.id)">
+              <i class="fas fa-server"></i>
+            </div>
+
+            <!-- Server info -->
+            <div class="server-info">
+              <div class="server-name">{{ server.name }}</div>
+              <div class="server-url-row">
+                <i class="fas fa-link"></i>
+                <span>{{ server.url }}</span>
+              </div>
+              <div class="server-stats">
+                <span class="stat connected" *ngIf="isServerConnected(server.id)">
+                  <i class="fas fa-check-circle"></i> Connected
+                </span>
+                <span class="stat disconnected" *ngIf="!isServerConnected(server.id) && server.enabled">
+                  <i class="fas fa-times-circle"></i> Offline
+                </span>
+                <span class="stat disabled" *ngIf="!server.enabled">
+                  <i class="fas fa-pause-circle"></i> Disabled
+                </span>
+                <span class="stat targets" *ngIf="getServerTargetCount(server.id) > 0">
+                  <i class="fas fa-desktop"></i> {{ getServerTargetCount(server.id) }} targets
+                </span>
+                <span class="stat user">
                   <i class="fas fa-user"></i> {{ server.username }}
-                </div>
-                <div
-                  class="server-targets text-muted small"
-                  *ngIf="getServerTargetCount(server.id) > 0"
-                >
-                  <i class="fas fa-server"></i>
-                  {{ getServerTargetCount(server.id) }} targets available
-                </div>
-                <div
-                  class="server-error text-danger small"
-                  *ngIf="getServerError(server.id)"
-                >
-                  <i class="fas fa-exclamation-triangle"></i>
-                  {{ getServerError(server.id) }}
-                </div>
+                </span>
               </div>
+              <div class="server-error" *ngIf="getServerError(server.id)">
+                <i class="fas fa-exclamation-triangle"></i>
+                {{ getServerError(server.id) }}
+              </div>
+            </div>
 
-              <div class="server-actions">
-                <button
-                  class="btn btn-sm btn-outline-primary me-1"
-                  (click)="refreshServer(server.id)"
-                  [disabled]="!server.enabled || isLoading"
-                  title="Refresh targets"
-                >
-                  <i class="fas fa-sync"></i>
-                </button>
-                <button
-                  class="btn btn-sm btn-outline-secondary me-1"
-                  (click)="editServer(server)"
-                  [disabled]="form.isEditing"
-                  title="Edit server"
-                >
-                  <i class="fas fa-edit"></i>
-                </button>
-                <button
-                  class="btn btn-sm"
-                  [class.btn-outline-success]="!server.enabled"
-                  [class.btn-outline-warning]="server.enabled"
-                  (click)="toggleServer(server)"
-                  [disabled]="form.isEditing"
-                  [title]="server.enabled ? 'Disable server' : 'Enable server'"
-                >
-                  <i class="fas" [class.fa-toggle-on]="server.enabled" [class.fa-toggle-off]="!server.enabled"></i>
-                </button>
-                <button
-                  class="btn btn-sm btn-outline-danger ms-1"
-                  (click)="deleteServer(server)"
-                  [disabled]="form.isEditing"
-                  title="Delete server"
-                >
-                  <i class="fas fa-trash"></i>
-                </button>
-              </div>
+            <!-- Actions -->
+            <div class="server-actions">
+              <button
+                class="action-btn refresh"
+                (click)="refreshServer(server.id)"
+                [disabled]="!server.enabled || isLoading"
+                title="Refresh targets"
+              >
+                <i class="fas fa-sync-alt"></i>
+              </button>
+              <button
+                class="action-btn edit"
+                (click)="editServer(server)"
+                [disabled]="form.isEditing"
+                title="Edit server"
+              >
+                <i class="fas fa-pen"></i>
+              </button>
+              <button
+                class="action-btn toggle"
+                [class.enabled]="server.enabled"
+                (click)="toggleServer(server)"
+                [disabled]="form.isEditing"
+                [title]="server.enabled ? 'Disable server' : 'Enable server'"
+              >
+                <i class="fas" [class.fa-toggle-on]="server.enabled" [class.fa-toggle-off]="!server.enabled"></i>
+              </button>
+              <button
+                class="action-btn delete"
+                (click)="deleteServer(server)"
+                [disabled]="form.isEditing"
+                title="Delete server"
+              >
+                <i class="fas fa-trash-alt"></i>
+              </button>
             </div>
           </div>
 
-          <div class="text-muted text-center py-4" *ngIf="servers.length === 0">
-            <i class="fas fa-server fa-2x mb-2"></i>
-            <p>No Warpgate servers configured.</p>
-            <p>Click "Add Server" to get started.</p>
+          <!-- Empty state -->
+          <div class="empty-state" *ngIf="servers.length === 0">
+            <div class="empty-icon">
+              <i class="fas fa-plug"></i>
+            </div>
+            <h4>No Servers</h4>
+            <p>Add your first Warpgate server to get started</p>
           </div>
         </div>
       </div>
@@ -407,48 +420,344 @@ interface ServerFormState {
       margin-bottom: 15px;
     }
 
+    .section-header h4 {
+      margin: 0;
+      font-weight: 600;
+    }
+
     .server-form {
       background: var(--bs-tertiary-bg, #f8f9fa);
+      border-radius: 12px;
+      border: 1px solid var(--bs-border-color, #dee2e6);
+    }
+
+    .server-form .card-body {
+      padding: 20px;
+    }
+
+    .server-form .card-title {
+      font-weight: 600;
+      margin-bottom: 20px;
+      padding-bottom: 12px;
+      border-bottom: 1px solid var(--bs-border-color, #dee2e6);
     }
 
     .form-group {
       margin-bottom: 15px;
     }
 
+    .form-group label {
+      font-weight: 500;
+      margin-bottom: 6px;
+      display: block;
+    }
+
     .form-actions {
       display: flex;
       gap: 10px;
       margin-top: 20px;
+      padding-top: 15px;
+      border-top: 1px solid var(--bs-border-color, #dee2e6);
     }
 
-    .server-item {
-      transition: opacity 0.2s;
+    /* Server List */
+    .server-list {
+      display: flex;
+      flex-direction: column;
+      gap: 12px;
     }
 
-    .server-item.disabled {
+    /* Server Card */
+    .server-card {
+      display: flex;
+      align-items: center;
+      padding: 16px;
+      background: var(--bs-body-bg, #fff);
+      border: 1px solid var(--bs-border-color, #dee2e6);
+      border-radius: 12px;
+      position: relative;
+      transition: all 0.2s ease;
+    }
+
+    .server-card:hover {
+      border-color: #667eea;
+      box-shadow: 0 4px 12px rgba(102, 126, 234, 0.15);
+      transform: translateY(-2px);
+    }
+
+    .server-card.disabled {
       opacity: 0.6;
+      background: var(--bs-tertiary-bg, #f8f9fa);
     }
 
-    .server-status i {
-      font-size: 12px;
+    .server-card.connected {
+      border-left: 3px solid #28a745;
     }
 
+    /* Status Dot */
+    .server-status-dot {
+      position: absolute;
+      top: 16px;
+      left: 16px;
+      width: 10px;
+      height: 10px;
+      border-radius: 50%;
+      background: #6c757d;
+      box-shadow: 0 0 0 2px var(--bs-body-bg, #fff);
+    }
+
+    .server-status-dot.online {
+      background: #28a745;
+      animation: pulse 2s infinite;
+    }
+
+    .server-status-dot.offline {
+      background: #dc3545;
+    }
+
+    .server-status-dot.paused {
+      background: #6c757d;
+    }
+
+    @keyframes pulse {
+      0%, 100% { box-shadow: 0 0 0 2px var(--bs-body-bg, #fff), 0 0 0 4px rgba(40, 167, 69, 0.3); }
+      50% { box-shadow: 0 0 0 2px var(--bs-body-bg, #fff), 0 0 0 6px rgba(40, 167, 69, 0); }
+    }
+
+    /* Server Avatar */
+    .server-avatar {
+      width: 48px;
+      height: 48px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+      color: white;
+      border-radius: 12px;
+      margin-left: 12px;
+      margin-right: 16px;
+      font-size: 1.2rem;
+      flex-shrink: 0;
+      transition: all 0.2s;
+    }
+
+    .server-avatar.active {
+      background: linear-gradient(135deg, #28a745 0%, #20c997 100%);
+      box-shadow: 0 4px 12px rgba(40, 167, 69, 0.3);
+    }
+
+    /* Server Info */
+    .server-info {
+      flex: 1;
+      min-width: 0;
+    }
+
+    .server-name {
+      font-weight: 600;
+      font-size: 1rem;
+      color: var(--bs-body-color);
+      margin-bottom: 4px;
+    }
+
+    .server-url-row {
+      display: flex;
+      align-items: center;
+      gap: 6px;
+      font-size: 0.85rem;
+      color: var(--bs-secondary-color, #6c757d);
+      margin-bottom: 8px;
+    }
+
+    .server-url-row i {
+      font-size: 0.7rem;
+      opacity: 0.7;
+    }
+
+    .server-stats {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 12px;
+    }
+
+    .server-stats .stat {
+      display: flex;
+      align-items: center;
+      gap: 4px;
+      font-size: 0.8rem;
+      padding: 3px 8px;
+      border-radius: 6px;
+      background: var(--bs-tertiary-bg, #f8f9fa);
+    }
+
+    .server-stats .stat i {
+      font-size: 0.7rem;
+    }
+
+    .server-stats .stat.connected {
+      background: rgba(40, 167, 69, 0.15);
+      color: #28a745;
+    }
+
+    .server-stats .stat.disconnected {
+      background: rgba(220, 53, 69, 0.15);
+      color: #dc3545;
+    }
+
+    .server-stats .stat.disabled {
+      background: rgba(108, 117, 125, 0.15);
+      color: #6c757d;
+    }
+
+    .server-stats .stat.targets {
+      background: rgba(13, 110, 253, 0.15);
+      color: #0d6efd;
+    }
+
+    .server-stats .stat.user {
+      color: var(--bs-secondary-color, #6c757d);
+    }
+
+    .server-error {
+      margin-top: 8px;
+      padding: 6px 10px;
+      background: rgba(220, 53, 69, 0.1);
+      border-radius: 6px;
+      font-size: 0.8rem;
+      color: #dc3545;
+      display: flex;
+      align-items: center;
+      gap: 6px;
+    }
+
+    /* Server Actions */
     .server-actions {
       display: flex;
-      gap: 2px;
+      gap: 6px;
+      margin-left: 16px;
     }
 
-    .server-actions .btn {
-      padding: 0.25rem 0.5rem;
+    .action-btn {
+      width: 36px;
+      height: 36px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      border: 1px solid var(--bs-border-color, #dee2e6);
+      border-radius: 8px;
+      background: var(--bs-body-bg, #fff);
+      color: var(--bs-secondary-color, #6c757d);
+      cursor: pointer;
+      transition: all 0.2s;
+    }
+
+    .action-btn:hover:not(:disabled) {
+      border-color: var(--bs-primary);
+      color: var(--bs-primary);
+      background: rgba(13, 110, 253, 0.1);
+    }
+
+    .action-btn:disabled {
+      opacity: 0.5;
+      cursor: not-allowed;
+    }
+
+    .action-btn.refresh:hover:not(:disabled) {
+      border-color: #0d6efd;
+      color: #0d6efd;
+      background: rgba(13, 110, 253, 0.1);
+    }
+
+    .action-btn.edit:hover:not(:disabled) {
+      border-color: #ffc107;
+      color: #ffc107;
+      background: rgba(255, 193, 7, 0.1);
+    }
+
+    .action-btn.toggle {
+      font-size: 1.1rem;
+    }
+
+    .action-btn.toggle.enabled {
+      color: #28a745;
+    }
+
+    .action-btn.toggle:hover:not(:disabled) {
+      border-color: #28a745;
+      background: rgba(40, 167, 69, 0.1);
+    }
+
+    .action-btn.delete:hover:not(:disabled) {
+      border-color: #dc3545;
+      color: #dc3545;
+      background: rgba(220, 53, 69, 0.1);
+    }
+
+    /* Empty State */
+    .empty-state {
+      text-align: center;
+      padding: 40px 20px;
+      background: var(--bs-tertiary-bg, #f8f9fa);
+      border-radius: 12px;
+      border: 2px dashed var(--bs-border-color, #dee2e6);
+    }
+
+    .empty-icon {
+      width: 64px;
+      height: 64px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+      color: white;
+      border-radius: 50%;
+      margin: 0 auto 16px;
+      font-size: 1.5rem;
+    }
+
+    .empty-state h4 {
+      margin: 0 0 8px 0;
+      font-weight: 600;
+      color: var(--bs-body-color);
+    }
+
+    .empty-state p {
+      margin: 0;
+      color: var(--bs-secondary-color, #6c757d);
+    }
+
+    /* Plugin Settings */
+    .plugin-settings {
+      padding: 20px;
+      background: var(--bs-tertiary-bg, #f8f9fa);
+      border-radius: 12px;
+    }
+
+    .plugin-settings h4 {
+      margin: 0 0 20px 0;
+      font-weight: 600;
     }
 
     .plugin-settings .form-group {
       max-width: 400px;
     }
 
+    /* Global Actions */
     .global-actions {
       border-top: 1px solid var(--bs-border-color, #dee2e6);
       padding-top: 20px;
+    }
+
+    /* OTP Section */
+    .otp-section {
+      margin: 20px 0;
+      padding: 16px;
+      background: rgba(13, 110, 253, 0.1);
+      border-radius: 10px;
+      border: 1px solid rgba(13, 110, 253, 0.2);
+    }
+
+    .otp-section .alert {
+      margin-bottom: 12px;
     }
   `],
 })
