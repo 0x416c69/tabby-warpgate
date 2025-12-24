@@ -257,7 +257,7 @@ describe('Warpgate Models', () => {
       const ticket: WarpgateTicket = {
         id: 'ticket-uuid-123',
         username: 'testuser',
-        target_name: 'my-server',
+        target: 'my-server',
         created: '2025-01-01T00:00:00Z',
         uses_left: 5,
         description: 'A test ticket',
@@ -265,7 +265,7 @@ describe('Warpgate Models', () => {
 
       expect(ticket.id).toBe('ticket-uuid-123');
       expect(ticket.username).toBe('testuser');
-      expect(ticket.target_name).toBe('my-server');
+      expect(ticket.target).toBe('my-server');
       expect(ticket.created).toBe('2025-01-01T00:00:00Z');
       expect(ticket.uses_left).toBe(5);
       expect(ticket.description).toBe('A test ticket');
@@ -275,7 +275,7 @@ describe('Warpgate Models', () => {
       const ticket: WarpgateTicket = {
         id: 'ticket-uuid-123',
         username: 'testuser',
-        target_name: 'my-server',
+        target: 'my-server',
         created: '2025-01-01T00:00:00Z',
       };
 
@@ -290,7 +290,7 @@ describe('Warpgate Models', () => {
         ticket: {
           id: 'ticket-uuid-123',
           username: 'testuser',
-          target_name: 'my-server',
+          target: 'my-server',
           created: '2025-01-01T00:00:00Z',
         },
         secret: 'abc123secret456',

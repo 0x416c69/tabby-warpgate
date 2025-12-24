@@ -280,7 +280,7 @@ describe('WarpgateApiClient', () => {
         ticket: {
           id: 'ticket-uuid-123',
           username: 'testuser',
-          target_name: 'my-server',
+          target: 'my-server',
           created: '2025-01-01T00:00:00Z',
           uses_left: 1,
         },
@@ -307,13 +307,13 @@ describe('WarpgateApiClient', () => {
       );
       expect(result.success).toBe(true);
       expect(result.data?.secret).toBe('abc123secret456');
-      expect(result.data?.ticket.target_name).toBe('my-server');
+      expect(result.data?.ticket.target).toBe('my-server');
     });
 
     it('should list tickets', async () => {
       const mockTickets = [
-        { id: '1', username: 'user1', target_name: 'server1', created: '2025-01-01T00:00:00Z' },
-        { id: '2', username: 'user2', target_name: 'server2', created: '2025-01-02T00:00:00Z' },
+        { id: '1', username: 'user1', target: 'server1', created: '2025-01-01T00:00:00Z' },
+        { id: '2', username: 'user2', target: 'server2', created: '2025-01-02T00:00:00Z' },
       ];
       mockFetch.mockResolvedValueOnce(createMockResponse(mockTickets));
 

@@ -605,6 +605,7 @@ export class WarpgateService {
 
   /**
    * Refresh targets for all connected servers
+   * Also cleans up used tickets in the background
    */
   async refreshAllTargets(): Promise<void> {
     const connectedServers = Array.from(this.connectionStatus.entries())
@@ -612,6 +613,11 @@ export class WarpgateService {
       .map(([serverId]) => serverId);
 
     await Promise.all(connectedServers.map(id => this.refreshTargets(id)));
+
+    // Clean up used tickets in the background (non-blocking)
+    this.cleanupAllUsedTickets().catch(error => {
+      log.debug('Background ticket cleanup error:', error);
+    });
   }
 
   /**
@@ -926,6 +932,93 @@ export class WarpgateService {
         this.ticketCache.delete(key);
       }
     }
+  }
+
+  /**
+   * Clean up used tickets on the Warpgate server
+   * Deletes tickets that:
+   * 1. Were created by this plugin (description starts with "Tabby Warpgate auto-generated")
+   * 2. Have uses_left === 0 (fully used)
+   * @param serverId Server ID to clean up tickets for
+   * @returns Number of tickets deleted
+   */
+  async cleanupUsedTickets(serverId: string): Promise<number> {
+    const client = this.clients.get(serverId);
+    if (!client) {
+      log.debug(`Cannot cleanup tickets: no client for server ${serverId}`);
+      return 0;
+    }
+
+    try {
+      // List all tickets from the admin API
+      const listResult = await client.listTickets();
+      if (!listResult.success || !listResult.data) {
+        log.debug(`Failed to list tickets for cleanup:`, listResult.error);
+        return 0;
+      }
+
+      const tickets = listResult.data;
+      const pluginTicketPrefix = 'Tabby Warpgate auto-generated';
+
+      // Filter tickets that were created by us and are fully used
+      const ticketsToDelete = tickets.filter(ticket =>
+        ticket.description?.startsWith(pluginTicketPrefix) &&
+        ticket.uses_left === 0
+      );
+
+      if (ticketsToDelete.length === 0) {
+        log.debug(`No used tickets to clean up on server ${serverId}`);
+        return 0;
+      }
+
+      log.debug(`Found ${ticketsToDelete.length} used tickets to clean up on server ${serverId}`);
+
+      // Delete each used ticket
+      let deletedCount = 0;
+      for (const ticket of ticketsToDelete) {
+        try {
+          const deleteResult = await client.deleteTicket(ticket.id);
+          if (deleteResult.success) {
+            deletedCount++;
+            log.debug(`Deleted used ticket ${ticket.id} for target ${ticket.target}`);
+          } else {
+            log.debug(`Failed to delete ticket ${ticket.id}:`, deleteResult.error);
+          }
+        } catch (error) {
+          log.debug(`Error deleting ticket ${ticket.id}:`, error);
+        }
+      }
+
+      if (deletedCount > 0) {
+        log.debug(`Cleaned up ${deletedCount} used tickets on server ${serverId}`);
+      }
+
+      return deletedCount;
+    } catch (error) {
+      log.error(`Error during ticket cleanup for server ${serverId}:`, error);
+      return 0;
+    }
+  }
+
+  /**
+   * Clean up used tickets on all connected servers
+   * @returns Total number of tickets deleted across all servers
+   */
+  async cleanupAllUsedTickets(): Promise<number> {
+    const connectedServers = Array.from(this.connectionStatus.entries())
+      .filter(([, status]) => status.connected)
+      .map(([serverId]) => serverId);
+
+    let totalDeleted = 0;
+    for (const serverId of connectedServers) {
+      totalDeleted += await this.cleanupUsedTickets(serverId);
+    }
+
+    if (totalDeleted > 0) {
+      log.debug(`Total tickets cleaned up: ${totalDeleted}`);
+    }
+
+    return totalDeleted;
   }
 
   /**

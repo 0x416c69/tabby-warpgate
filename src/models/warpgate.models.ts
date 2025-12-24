@@ -173,13 +173,13 @@ export interface WarpgateTicket {
   id: string;
   /** Username associated with the ticket */
   username: string;
-  /** Target name the ticket grants access to */
-  target_name: string;
+  /** Target name the ticket grants access to (API returns 'target' not 'target_name') */
+  target: string;
   /** Ticket creation timestamp */
   created: string;
   /** Optional expiry timestamp */
-  expiry?: string;
-  /** Remaining uses (-1 for unlimited) */
+  expiry?: string | null;
+  /** Remaining uses (-1 for unlimited, 0 means used up) */
   uses_left?: number;
   /** Description of the ticket */
   description?: string;
