@@ -1,6 +1,6 @@
 {
   "name": "tabby-warpgate",
-  "version": "1.0.1",
+  "version": "1.0.2",
   "description": "Warpgate SSH gateway integration for Tabby - connect to SSH hosts through Warpgate with one click",
   "keywords": [
     "tabby-plugin",
