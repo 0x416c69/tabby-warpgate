@@ -681,7 +681,7 @@ export class WarpgateService {
     log.debug(`getSshConnectionDetails called for ${targetName} on server ${serverId}`);
 
     if (!server || !client) {
-      log.debug(`getSshConnectionDetails: server or client not found`);
+      log.debug('getSshConnectionDetails: server or client not found');
       return null;
     }
 
@@ -770,7 +770,7 @@ export class WarpgateService {
     log.debug(`getOrCreateTicket called for ${targetName} on server ${serverId}`);
 
     if (!server || !client) {
-      log.debug(`getOrCreateTicket: server or client not found`);
+      log.debug('getOrCreateTicket: server or client not found');
       return null;
     }
 
@@ -842,8 +842,8 @@ export class WarpgateService {
 
       log.debug(`Ticket creation result: ${result.success ? 'success' : 'failed'}`);
       if (!result.success) {
-        log.debug(`Ticket creation error:`, JSON.stringify(result.error, null, 2));
-        log.debug(`Full result:`, JSON.stringify(result, null, 2));
+        log.debug('Ticket creation error:', JSON.stringify(result.error, null, 2));
+        log.debug('Full result:', JSON.stringify(result, null, 2));
       }
 
       if (result.success && result.data) {
@@ -866,7 +866,7 @@ export class WarpgateService {
         };
       } else {
         // Ticket creation failed - fall back to traditional auth
-        log.debug(`Ticket creation failed, falling back to password auth`);
+        log.debug('Ticket creation failed, falling back to password auth');
         this.showNotification(
           'warning',
           `Could not create ticket for ${targetName}, using password authentication`
@@ -953,7 +953,7 @@ export class WarpgateService {
       // List all tickets from the admin API
       const listResult = await client.listTickets();
       if (!listResult.success || !listResult.data) {
-        log.debug(`Failed to list tickets for cleanup:`, listResult.error);
+        log.debug('Failed to list tickets for cleanup:', listResult.error);
         return 0;
       }
 
@@ -1045,7 +1045,7 @@ export class WarpgateService {
     } catch (error) {
       const errorMessage = error instanceof Error ? error.message : 'Unknown error';
       this.showNotification('error', `Failed to generate OTP: ${errorMessage}`);
-      log.error(`TOTP generation failed:`, error);
+      log.error('TOTP generation failed:', error);
       return null;
     }
   }

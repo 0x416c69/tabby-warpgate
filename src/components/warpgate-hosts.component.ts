@@ -15,7 +15,6 @@ import {
   WarpgateServerConfig,
   WarpgateConnectionStatus,
   WarpgatePluginConfig,
-  HostsViewMode,
 } from '../models/warpgate.models';
 import { getBootstrapColor } from '../models/theme.constants';
 import { createLogger } from '../utils/debug-logger';
@@ -1441,7 +1440,7 @@ export class WarpgateHostsComponent implements OnInit, OnDestroy {
 
       this.notifications.info(`Connecting to ${host.target.name}...`);
     } catch (error) {
-      log.error(` Failed to connect:`, error);
+      log.error(' Failed to connect:', error);
       this.notifications.error(
         `Failed to connect: ${error instanceof Error ? error.message : 'Unknown error'}`
       );

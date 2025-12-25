@@ -10,7 +10,6 @@ import { SSHProfile } from 'tabby-ssh';
 import { WarpgateService } from './warpgate.service';
 import { WarpgateTarget, WarpgateServerConfig } from '../models/warpgate.models';
 import { BOOTSTRAP_COLORS, THEME_ICONS } from '../models/theme.constants';
-import { getErrorMessage } from '../utils/error-handling';
 import { createLogger } from '../utils/debug-logger';
 
 const log = createLogger('ProfileService');
@@ -267,14 +266,14 @@ export class WarpgateProfileProvider extends ProfileProvider<WarpgateSSHProfile>
 
     // If password-only is configured, skip ticket auth entirely
     if (authMethod === 'password') {
-      log.debug(` Using password auth (configured)`);
+      log.debug(' Using password auth (configured)');
       return this.createProfileWithAutoAuth(server, target);
     }
 
     // Try to get a ticket for one-click access (for 'auto' or 'ticket' modes)
     try {
       const ticketDetails = await this.warpgateService.getOrCreateTicket(server.id, target.name);
-      log.debug(` Ticket details:`, ticketDetails);
+      log.debug(' Ticket details:', ticketDetails);
       if (ticketDetails && ticketDetails.username.startsWith('ticket-')) {
         log.debug(` Using ticket auth profile with username: ${ticketDetails.username}`);
         // Create profile directly with the ticket details we already have
@@ -285,7 +284,7 @@ export class WarpgateProfileProvider extends ProfileProvider<WarpgateSSHProfile>
       }
     } catch (error) {
       // Ticket creation failed
-      log.debug(` Ticket creation threw error:`, error);
+      log.debug(' Ticket creation threw error:', error);
 
       // If ticket-only mode, throw error
       if (authMethod === 'ticket') {
@@ -294,7 +293,7 @@ export class WarpgateProfileProvider extends ProfileProvider<WarpgateSSHProfile>
     }
 
     // Fall back to automatic password authentication (only for 'auto' mode)
-    log.debug(` Falling back to auto auth profile`);
+    log.debug(' Falling back to auto auth profile');
     return this.createProfileWithAutoAuth(server, target);
   }
 

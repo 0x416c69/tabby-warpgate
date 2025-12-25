@@ -133,6 +133,7 @@ export class WarpgateSshHandler {
       || Object.getOwnPropertyDescriptor(Object.getPrototypeOf(tab), 'activeKIPrompt');
 
     if (originalDescriptor) {
+      // eslint-disable-next-line @typescript-eslint/no-this-alias
       const self = this;
       let internalValue = tab.activeKIPrompt;
 
@@ -142,7 +143,7 @@ export class WarpgateSshHandler {
         },
         set(value: any) {
           internalValue = value;
-          log.debug(` activeKIPrompt changed:`, value);
+          log.debug(' activeKIPrompt changed:', value);
 
           // Call original setter FIRST if it exists
           // This ensures Tabby's internal state is updated before we respond
@@ -162,14 +163,14 @@ export class WarpgateSshHandler {
 
       log.debug(` Installed activeKIPrompt interceptor for ${profile.warpgate?.targetName}`);
     } else {
-      log.debug(` Could not find activeKIPrompt descriptor, falling back to polling`);
+      log.debug(' Could not find activeKIPrompt descriptor, falling back to polling');
 
       // Fallback: poll for changes to activeKIPrompt
       const pollInterval = setInterval(() => {
         const newPrompt = tab.activeKIPrompt;
         if (newPrompt && newPrompt !== currentPrompt) {
           currentPrompt = newPrompt;
-          log.debug(` activeKIPrompt detected via polling:`, newPrompt);
+          log.debug(' activeKIPrompt detected via polling:', newPrompt);
           this.handleKIPrompt(tab, profile, newPrompt);
         }
       }, 100);
@@ -212,7 +213,7 @@ export class WarpgateSshHandler {
 
     // Check if we've already handled this exact prompt object
     if (this.handledPrompts.has(prompt)) {
-      log.debug(` Skipping already-handled prompt (WeakSet check)`);
+      log.debug(' Skipping already-handled prompt (WeakSet check)');
       return;
     }
 
@@ -230,7 +231,7 @@ export class WarpgateSshHandler {
 
     // Mark this prompt as handled
     this.handledPrompts.add(prompt);
-    log.debug(` Marked prompt as handled in WeakSet`);
+    log.debug(' Marked prompt as handled in WeakSet');
 
     // The KI prompt structure can vary - it may have:
     // - prompt.name: The name/title of the prompt (e.g., "Two-factor authentication")
@@ -252,7 +253,7 @@ export class WarpgateSshHandler {
     // Combine all text for matching
     const allText = `${promptName} ${promptText} ${instruction} ${firstPromptText}`.toLowerCase();
 
-    log.debug(` KI Prompt received:`, {
+    log.debug(' KI Prompt received:', {
       name: promptName,
       prompt: promptText,
       instruction: instruction,
@@ -343,7 +344,7 @@ export class WarpgateSshHandler {
       }
     }
 
-    log.debug(` Failed to generate OTP code - no serverId available`);
+    log.debug(' Failed to generate OTP code - no serverId available');
     return null;
   }
 
@@ -359,11 +360,11 @@ export class WarpgateSshHandler {
       log.debug(' Using prompt.respond()');
       log.debug(` prompt.name: ${prompt.name}`);
       log.debug(` prompt.instruction: ${prompt.instruction}`);
-      log.debug(` prompt.prompts:`, prompt.prompts);
+      log.debug(' prompt.prompts:', prompt.prompts);
       log.debug(` prompt.prompts length: ${prompt.prompts?.length || 0}`);
       log.debug(` prompt.responses type: ${Array.isArray(prompt.responses) ? 'array' : typeof prompt.responses}`);
       log.debug(` prompt.responses length before: ${prompt.responses?.length || 0}`);
-      log.debug(` prompt.responses current values:`, prompt.responses);
+      log.debug(' prompt.responses current values:', prompt.responses);
 
       // IMPORTANT: Based on Tabby's KeyboardInteractivePrompt implementation:
       // 1. The responses array is pre-initialized with empty strings (one per prompt)
@@ -381,16 +382,16 @@ export class WarpgateSshHandler {
 
         prompt.responses[responseIndex] = response;
         log.debug(` Set prompt.responses[${responseIndex}] = "${response}"`);
-        log.debug(` prompt.responses after update:`, JSON.stringify(prompt.responses));
-        log.debug(` prompt.responses[0] value:`, prompt.responses[0]);
-        log.debug(` prompt.responses[0] type:`, typeof prompt.responses[0]);
-        log.debug(` prompt.responses[0] length:`, prompt.responses[0]?.length);
+        log.debug(' prompt.responses after update:', JSON.stringify(prompt.responses));
+        log.debug(' prompt.responses[0] value:', prompt.responses[0]);
+        log.debug(' prompt.responses[0] type:', typeof prompt.responses[0]);
+        log.debug(' prompt.responses[0] length:', prompt.responses[0]?.length);
       } else {
         log.warn('prompt.responses is not an array, attempting to create it');
         prompt.responses = [response];
       }
 
-      log.debug(` Calling prompt.respond() with NO arguments`);
+      log.debug(' Calling prompt.respond() with NO arguments');
 
       try {
         prompt.respond();
@@ -406,7 +407,7 @@ export class WarpgateSshHandler {
       log.debug(' Using tab.session.activeKIPrompt.respond()');
       if (tab.session.activeKIPrompt.responses && Array.isArray(tab.session.activeKIPrompt.responses)) {
         tab.session.activeKIPrompt.responses[0] = response;
-        log.debug(` Set tab.session.activeKIPrompt.responses[0]`);
+        log.debug(' Set tab.session.activeKIPrompt.responses[0]');
       } else {
         tab.session.activeKIPrompt.responses = [response];
       }
