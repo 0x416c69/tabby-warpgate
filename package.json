@@ -6,12 +6,18 @@
     "tabby-plugin",
     "warpgate",
     "ssh",
-    "sftp",
     "bastion",
-    "gateway"
+    "gateway",
+    "terminal",
+    "ssh-client",
+    "jump-host"
   ],
-  "author": "AliAssassiN",
+  "author": {
+    "name": "AliAssassiN",
+    "url": "https://github.com/0x416c69"
+  },
   "license": "MIT",
+  "homepage": "https://github.com/0x416c69/tabby-warpgate#readme",
   "main": "dist/index.js",
   "typings": "dist/index.d.ts",
   "scripts": {
