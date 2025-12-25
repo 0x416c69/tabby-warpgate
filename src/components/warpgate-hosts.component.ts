@@ -4,7 +4,7 @@
  * Provides one-click SSH connections
  */
 
-import { Component, OnInit, OnDestroy, Inject } from '@angular/core';
+import { Component, OnInit, OnDestroy, Inject, ViewChild, ElementRef, HostListener } from '@angular/core';
 import { Subscription } from 'rxjs';
 import { AppService, ProfilesService, NotificationsService } from 'tabby-core';
 
@@ -15,6 +15,7 @@ import {
   WarpgateServerConfig,
   WarpgateConnectionStatus,
   WarpgatePluginConfig,
+  HostsViewMode,
 } from '../models/warpgate.models';
 import { getBootstrapColor } from '../models/theme.constants';
 import { createLogger } from '../utils/debug-logger';
@@ -99,7 +100,52 @@ interface HostGroup {
 @Component({
   selector: 'warpgate-hosts',
   template: `
-    <div class="warpgate-hosts">
+    <div class="warpgate-hosts" (keydown)="onKeyDown($event)">
+      <!-- Quick Search Modal -->
+      <div class="quick-search-overlay" *ngIf="showQuickSearch" (click)="closeQuickSearch()">
+        <div class="quick-search-modal" (click)="$event.stopPropagation()">
+          <div class="quick-search-header">
+            <i class="fas fa-search"></i>
+            <input
+              #quickSearchInput
+              type="text"
+              class="quick-search-input"
+              placeholder="Search hosts... (Esc to close)"
+              [(ngModel)]="quickSearchQuery"
+              (ngModelChange)="filterQuickSearch()"
+              (keydown)="onQuickSearchKeyDown($event)"
+            />
+            <span class="quick-search-hint">Ctrl+K</span>
+          </div>
+          <div class="quick-search-results">
+            <div
+              class="quick-search-item"
+              *ngFor="let host of quickSearchResults; let i = index"
+              [class.selected]="i === quickSearchSelectedIndex"
+              [class.pinned]="isHostPinned(host)"
+              (click)="connectFromQuickSearch(host)"
+              (mouseenter)="quickSearchSelectedIndex = i"
+            >
+              <div class="quick-item-icon" [style.backgroundColor]="getIconColor(host.target)">
+                <i [class]="getIcon(host.target)"></i>
+              </div>
+              <div class="quick-item-info">
+                <div class="quick-item-name">
+                  <i class="fas fa-star pinned-indicator" *ngIf="isHostPinned(host)"></i>
+                  {{ host.target.name }}
+                </div>
+                <div class="quick-item-meta">{{ host.server.name }}<span *ngIf="host.target.description"> · {{ host.target.description }}</span></div>
+              </div>
+              <div class="quick-item-status" [class.online]="isServerConnected(host.server.id)"></div>
+            </div>
+            <div class="quick-search-empty" *ngIf="quickSearchResults.length === 0">
+              <i class="fas fa-search"></i>
+              <span>No hosts found</span>
+            </div>
+          </div>
+        </div>
+      </div>
+
       <!-- Header -->
       <div class="hosts-header">
         <div class="header-title">
@@ -113,16 +159,21 @@ interface HostGroup {
           </div>
         </div>
         <div class="header-actions">
-          <div class="search-wrapper">
-            <i class="fas fa-search search-icon"></i>
-            <input
-              type="text"
-              class="form-control form-control-sm search-input"
-              placeholder="Search..."
-              [(ngModel)]="searchQuery"
-              (ngModelChange)="filterHosts()"
-            />
-          </div>
+          <button
+            class="btn btn-sm btn-icon"
+            (click)="openQuickSearch()"
+            title="Quick Search (Ctrl+K)"
+          >
+            <i class="fas fa-search"></i>
+          </button>
+          <button
+            class="btn btn-sm btn-icon"
+            [class.active]="config.viewMode === 'compact'"
+            (click)="toggleViewMode()"
+            [title]="config.viewMode === 'grid' ? 'Switch to compact view' : 'Switch to grid view'"
+          >
+            <i class="fas" [class.fa-th-large]="config.viewMode === 'compact'" [class.fa-list]="config.viewMode === 'grid'"></i>
+          </button>
           <button
             class="btn btn-sm btn-icon refresh-btn"
             [class.refreshing]="isRefreshing"
@@ -180,7 +231,7 @@ interface HostGroup {
       </div>
 
       <!-- Host Groups -->
-      <div class="host-groups" *ngIf="groups.length > 0">
+      <div class="host-groups" *ngIf="groups.length > 0" [class.compact-mode]="config.viewMode === 'compact'">
         <div class="host-group" *ngFor="let group of groups">
           <!-- Group Header -->
           <div
@@ -196,16 +247,27 @@ interface HostGroup {
             <span class="group-count">{{ group.hosts.length }}</span>
           </div>
 
-          <!-- Group Hosts - Grid Layout -->
-          <div class="group-hosts-grid" [class.expanded]="group.expanded">
+          <!-- Grid View -->
+          <div class="group-hosts-grid" [class.expanded]="group.expanded" *ngIf="config.viewMode === 'grid'">
             <div
               class="host-card"
               *ngFor="let host of group.hosts"
               [class.connecting]="host.isConnecting"
+              [class.pinned]="isHostPinned(host)"
               (click)="connectSsh(host)"
             >
               <!-- Status indicator -->
               <div class="host-status" [class.online]="isServerConnected(host.server.id)"></div>
+
+              <!-- Pin button -->
+              <button
+                class="pin-btn"
+                [class.pinned]="isHostPinned(host)"
+                (click)="togglePin(host); $event.stopPropagation()"
+                [title]="isHostPinned(host) ? 'Unpin host' : 'Pin to top'"
+              >
+                <i class="fas fa-star"></i>
+              </button>
 
               <!-- Card Header with Icon and Actions -->
               <div class="card-header">
@@ -237,6 +299,41 @@ interface HostGroup {
                   </span>
                 </div>
               </div>
+            </div>
+          </div>
+
+          <!-- Compact View -->
+          <div class="group-hosts-compact" [class.expanded]="group.expanded" *ngIf="config.viewMode === 'compact'">
+            <div
+              class="host-row"
+              *ngFor="let host of group.hosts"
+              [class.connecting]="host.isConnecting"
+              [class.pinned]="isHostPinned(host)"
+              (click)="connectSsh(host)"
+            >
+              <div class="row-status" [class.online]="isServerConnected(host.server.id)"></div>
+              <div class="row-icon" [style.backgroundColor]="getIconColor(host.target)">
+                <i [class]="getIcon(host.target)"></i>
+              </div>
+              <div class="row-info">
+                <span class="row-name">{{ host.target.name }}</span>
+                <span class="row-server">{{ host.server.name }}</span>
+              </div>
+              <button
+                class="row-pin-btn"
+                [class.pinned]="isHostPinned(host)"
+                (click)="togglePin(host); $event.stopPropagation()"
+                [title]="isHostPinned(host) ? 'Unpin' : 'Pin'"
+              >
+                <i class="fas fa-star"></i>
+              </button>
+              <button
+                class="row-connect-btn"
+                (click)="connectSsh(host); $event.stopPropagation()"
+                [disabled]="host.isConnecting"
+              >
+                <i class="fas" [class.fa-terminal]="!host.isConnecting" [class.fa-spinner]="host.isConnecting" [class.fa-spin]="host.isConnecting"></i>
+              </button>
             </div>
           </div>
         </div>
@@ -564,16 +661,17 @@ interface HostGroup {
       pointer-events: none;
     }
 
-    /* Status Indicator */
+    /* Status Indicator - top left corner */
     .host-status {
       position: absolute;
-      top: 14px;
-      right: 14px;
+      top: 12px;
+      left: 12px;
       width: 10px;
       height: 10px;
       border-radius: 50%;
       background: #dc3545;
       box-shadow: 0 0 0 2px var(--bs-body-bg, #1a1a2e);
+      z-index: 2;
     }
 
     .host-status.online {
@@ -592,6 +690,7 @@ interface HostGroup {
       align-items: flex-start;
       justify-content: space-between;
       margin-bottom: 12px;
+      padding-right: 76px; /* Space for pin + connect buttons */
     }
 
     /* Host Icon */
@@ -609,22 +708,26 @@ interface HostGroup {
       box-shadow: 0 4px 12px rgba(0, 0, 0, 0.2);
     }
 
-    /* Connect Button */
+    /* Connect Button - top right corner */
     .connect-btn {
+      position: absolute;
+      top: 12px;
+      right: 12px;
       display: flex;
       align-items: center;
       justify-content: center;
-      width: 36px;
-      height: 36px;
+      width: 28px;
+      height: 28px;
       padding: 0;
       border: none;
-      border-radius: 10px;
+      border-radius: 8px;
       background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
       color: white;
-      font-size: 0.9rem;
+      font-size: 0.8rem;
       cursor: pointer;
       transition: all 0.25s ease;
       opacity: 0;
+      z-index: 3;
     }
 
     .host-card:hover .connect-btn {
@@ -730,9 +833,382 @@ interface HostGroup {
         grid-template-columns: 1fr;
       }
     }
+
+    /* Pin Button - next to connect button */
+    .pin-btn {
+      position: absolute;
+      top: 12px;
+      right: 44px; /* 12px + 28px (connect btn) + 4px gap */
+      width: 28px;
+      height: 28px;
+      padding: 0;
+      border: none;
+      border-radius: 8px;
+      background: transparent;
+      color: var(--bs-secondary-color, #6c757d);
+      font-size: 0.8rem;
+      cursor: pointer;
+      transition: all 0.2s ease;
+      opacity: 0;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      z-index: 3;
+    }
+
+    .host-card:hover .pin-btn {
+      opacity: 0.6;
+    }
+
+    .pin-btn:hover {
+      opacity: 1 !important;
+      color: #ffc107;
+      background: rgba(255, 193, 7, 0.15);
+    }
+
+    .pin-btn.pinned {
+      opacity: 1;
+      color: #ffc107;
+    }
+
+    .host-card.pinned {
+      border-color: rgba(255, 193, 7, 0.3);
+    }
+
+    .host-card.pinned::before {
+      content: '';
+      position: absolute;
+      top: 0;
+      left: 0;
+      right: 0;
+      height: 3px;
+      background: linear-gradient(90deg, #ffc107, #ff9800);
+      border-radius: 14px 14px 0 0;
+    }
+
+    /* View Mode Toggle Active State */
+    .btn-icon.active {
+      background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+      border-color: transparent;
+      color: white;
+    }
+
+    /* Compact View Styles */
+    .group-hosts-compact {
+      max-height: 0;
+      overflow: hidden;
+      transition: all 0.3s ease;
+      margin-top: 0;
+    }
+
+    .group-hosts-compact.expanded {
+      max-height: 5000px;
+      margin-top: 8px;
+    }
+
+    .host-row {
+      display: flex;
+      align-items: center;
+      padding: 10px 14px;
+      margin-bottom: 4px;
+      background: var(--bs-tertiary-bg, rgba(255,255,255,0.03));
+      border: 1px solid var(--bs-border-color, rgba(255,255,255,0.08));
+      border-radius: 10px;
+      cursor: pointer;
+      transition: all 0.2s ease;
+      gap: 12px;
+    }
+
+    .host-row:hover {
+      border-color: #667eea;
+      background: var(--bs-secondary-bg, rgba(102, 126, 234, 0.08));
+    }
+
+    .host-row.connecting {
+      opacity: 0.5;
+      pointer-events: none;
+    }
+
+    .host-row.pinned {
+      border-left: 3px solid #ffc107;
+    }
+
+    .row-status {
+      width: 8px;
+      height: 8px;
+      border-radius: 50%;
+      background: #dc3545;
+      flex-shrink: 0;
+    }
+
+    .row-status.online {
+      background: #28a745;
+    }
+
+    .row-icon {
+      width: 32px;
+      height: 32px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      background: var(--bs-primary);
+      color: white;
+      border-radius: 8px;
+      font-size: 0.85rem;
+      flex-shrink: 0;
+    }
+
+    .row-info {
+      flex: 1;
+      min-width: 0;
+      display: flex;
+      align-items: center;
+      gap: 12px;
+    }
+
+    .row-name {
+      font-weight: 600;
+      font-size: 0.9rem;
+      color: var(--bs-body-color);
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+    }
+
+    .row-server {
+      font-size: 0.8rem;
+      color: var(--bs-secondary-color, #6c757d);
+      white-space: nowrap;
+    }
+
+    .row-pin-btn {
+      width: 28px;
+      height: 28px;
+      padding: 0;
+      border: none;
+      border-radius: 6px;
+      background: transparent;
+      color: var(--bs-secondary-color, #6c757d);
+      font-size: 0.75rem;
+      cursor: pointer;
+      transition: all 0.2s ease;
+      opacity: 0;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+    }
+
+    .host-row:hover .row-pin-btn {
+      opacity: 0.6;
+    }
+
+    .row-pin-btn:hover {
+      opacity: 1 !important;
+      color: #ffc107;
+    }
+
+    .row-pin-btn.pinned {
+      opacity: 1;
+      color: #ffc107;
+    }
+
+    .row-connect-btn {
+      width: 32px;
+      height: 32px;
+      padding: 0;
+      border: none;
+      border-radius: 8px;
+      background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+      color: white;
+      font-size: 0.8rem;
+      cursor: pointer;
+      transition: all 0.2s ease;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      opacity: 0;
+    }
+
+    .host-row:hover .row-connect-btn {
+      opacity: 1;
+    }
+
+    .row-connect-btn:hover:not(:disabled) {
+      transform: scale(1.05);
+    }
+
+    .row-connect-btn:disabled {
+      opacity: 0.5;
+      cursor: not-allowed;
+    }
+
+    /* Quick Search Modal */
+    .quick-search-overlay {
+      position: fixed;
+      top: 0;
+      left: 0;
+      right: 0;
+      bottom: 0;
+      background: rgba(0, 0, 0, 0.6);
+      display: flex;
+      align-items: flex-start;
+      justify-content: center;
+      padding-top: 15vh;
+      z-index: 10000;
+      backdrop-filter: blur(4px);
+    }
+
+    .quick-search-modal {
+      width: 100%;
+      max-width: 550px;
+      background: var(--bs-body-bg, #1a1a2e);
+      border: 1px solid var(--bs-border-color, rgba(255,255,255,0.15));
+      border-radius: 16px;
+      box-shadow: 0 25px 50px rgba(0, 0, 0, 0.5);
+      overflow: hidden;
+    }
+
+    .quick-search-header {
+      display: flex;
+      align-items: center;
+      padding: 16px 20px;
+      border-bottom: 1px solid var(--bs-border-color, rgba(255,255,255,0.1));
+      gap: 14px;
+    }
+
+    .quick-search-header i {
+      color: var(--bs-secondary-color, #6c757d);
+      font-size: 1rem;
+    }
+
+    .quick-search-input {
+      flex: 1;
+      background: transparent;
+      border: none;
+      outline: none;
+      font-size: 1.1rem;
+      color: var(--bs-body-color);
+    }
+
+    .quick-search-input::placeholder {
+      color: var(--bs-secondary-color, #6c757d);
+    }
+
+    .quick-search-hint {
+      font-size: 0.75rem;
+      color: var(--bs-secondary-color, #6c757d);
+      background: var(--bs-tertiary-bg, rgba(255,255,255,0.05));
+      padding: 4px 8px;
+      border-radius: 6px;
+    }
+
+    .quick-search-results {
+      max-height: 400px;
+      overflow-y: auto;
+    }
+
+    .quick-search-item {
+      display: flex;
+      align-items: center;
+      padding: 12px 20px;
+      gap: 14px;
+      cursor: pointer;
+      transition: background 0.15s ease;
+    }
+
+    .quick-search-item:hover,
+    .quick-search-item.selected {
+      background: var(--bs-tertiary-bg, rgba(255,255,255,0.05));
+    }
+
+    .quick-search-item.selected {
+      background: rgba(102, 126, 234, 0.15);
+    }
+
+    .quick-item-icon {
+      width: 36px;
+      height: 36px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      background: var(--bs-primary);
+      color: white;
+      border-radius: 10px;
+      font-size: 0.9rem;
+      flex-shrink: 0;
+    }
+
+    .quick-item-info {
+      flex: 1;
+      min-width: 0;
+    }
+
+    .quick-item-name {
+      font-weight: 600;
+      font-size: 0.95rem;
+      color: var(--bs-body-color);
+      display: flex;
+      align-items: center;
+      gap: 6px;
+    }
+
+    .pinned-indicator {
+      color: #ffc107;
+      font-size: 0.7rem;
+    }
+
+    .quick-item-meta {
+      font-size: 0.8rem;
+      color: var(--bs-secondary-color, #6c757d);
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+    }
+
+    .quick-item-status {
+      width: 10px;
+      height: 10px;
+      border-radius: 50%;
+      background: #dc3545;
+      flex-shrink: 0;
+    }
+
+    .quick-item-status.online {
+      background: #28a745;
+    }
+
+    .quick-search-empty {
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      padding: 40px 20px;
+      color: var(--bs-secondary-color, #6c757d);
+      gap: 10px;
+    }
+
+    .quick-search-empty i {
+      font-size: 2rem;
+      opacity: 0.5;
+    }
+
+    .quick-search-results::-webkit-scrollbar {
+      width: 6px;
+    }
+
+    .quick-search-results::-webkit-scrollbar-track {
+      background: transparent;
+    }
+
+    .quick-search-results::-webkit-scrollbar-thumb {
+      background: var(--bs-secondary-bg, rgba(255,255,255,0.1));
+      border-radius: 3px;
+    }
   `],
 })
 export class WarpgateHostsComponent implements OnInit, OnDestroy {
+  @ViewChild('quickSearchInput') quickSearchInput!: ElementRef<HTMLInputElement>;
+
   groups: HostGroup[] = [];
   searchQuery = '';
   isLoading = false;
@@ -742,6 +1218,12 @@ export class WarpgateHostsComponent implements OnInit, OnDestroy {
   hasServers = false;
   disconnectedServers: WarpgateServerConfig[] = [];
   config: WarpgatePluginConfig;
+
+  // Quick search state
+  showQuickSearch = false;
+  quickSearchQuery = '';
+  quickSearchResults: HostItem[] = [];
+  quickSearchSelectedIndex = 0;
 
   private allHosts: HostItem[] = [];
   private subscriptions: Subscription[] = [];
@@ -854,10 +1336,17 @@ export class WarpgateHostsComponent implements OnInit, OnDestroy {
   }
 
   /**
-   * Sort hosts based on configuration
+   * Sort hosts based on configuration (pinned hosts first)
    */
   private sortHosts(hosts: HostItem[]): HostItem[] {
     return [...hosts].sort((a, b) => {
+      // Pinned hosts always come first
+      const aPinned = this.isHostPinned(a);
+      const bPinned = this.isHostPinned(b);
+      if (aPinned && !bPinned) return -1;
+      if (!aPinned && bPinned) return 1;
+
+      // Then sort by configured criteria
       switch (this.config.sortBy) {
         case 'server':
           return a.server.name.localeCompare(b.server.name);
@@ -1026,5 +1515,165 @@ export class WarpgateHostsComponent implements OnInit, OnDestroy {
    */
   isServerConnected(serverId: string): boolean {
     return this.warpgateService.isConnected(serverId);
+  }
+
+  // ==================== Quick Search ====================
+
+  /**
+   * Handle global keyboard events
+   */
+  @HostListener('document:keydown', ['$event'])
+  onKeyDown(event: KeyboardEvent): void {
+    // Ctrl+K or Cmd+K to open quick search
+    if ((event.ctrlKey || event.metaKey) && event.key === 'k') {
+      event.preventDefault();
+      this.openQuickSearch();
+    }
+  }
+
+  /**
+   * Open quick search modal
+   */
+  openQuickSearch(): void {
+    this.showQuickSearch = true;
+    this.quickSearchQuery = '';
+    this.quickSearchSelectedIndex = 0;
+    this.filterQuickSearch();
+
+    // Focus input after view updates
+    setTimeout(() => {
+      this.quickSearchInput?.nativeElement?.focus();
+    }, 50);
+  }
+
+  /**
+   * Close quick search modal
+   */
+  closeQuickSearch(): void {
+    this.showQuickSearch = false;
+    this.quickSearchQuery = '';
+    this.quickSearchResults = [];
+    this.quickSearchSelectedIndex = 0;
+  }
+
+  /**
+   * Filter hosts for quick search
+   */
+  filterQuickSearch(): void {
+    let results = [...this.allHosts];
+
+    // Filter by query
+    if (this.quickSearchQuery.trim()) {
+      const query = this.quickSearchQuery.toLowerCase();
+      results = results.filter(host =>
+        host.target.name.toLowerCase().includes(query) ||
+        host.target.description?.toLowerCase().includes(query) ||
+        host.server.name.toLowerCase().includes(query) ||
+        host.target.group?.name.toLowerCase().includes(query)
+      );
+    }
+
+    // Sort: pinned first, then alphabetically
+    results.sort((a, b) => {
+      const aPinned = this.isHostPinned(a);
+      const bPinned = this.isHostPinned(b);
+      if (aPinned && !bPinned) return -1;
+      if (!aPinned && bPinned) return 1;
+      return a.target.name.localeCompare(b.target.name);
+    });
+
+    this.quickSearchResults = results.slice(0, 20); // Limit to 20 results
+    this.quickSearchSelectedIndex = 0;
+  }
+
+  /**
+   * Handle keyboard navigation in quick search
+   */
+  onQuickSearchKeyDown(event: KeyboardEvent): void {
+    switch (event.key) {
+      case 'ArrowDown':
+        event.preventDefault();
+        if (this.quickSearchSelectedIndex < this.quickSearchResults.length - 1) {
+          this.quickSearchSelectedIndex++;
+        }
+        break;
+
+      case 'ArrowUp':
+        event.preventDefault();
+        if (this.quickSearchSelectedIndex > 0) {
+          this.quickSearchSelectedIndex--;
+        }
+        break;
+
+      case 'Enter':
+        event.preventDefault();
+        if (this.quickSearchResults.length > 0) {
+          this.connectFromQuickSearch(this.quickSearchResults[this.quickSearchSelectedIndex]);
+        }
+        break;
+
+      case 'Escape':
+        event.preventDefault();
+        this.closeQuickSearch();
+        break;
+    }
+  }
+
+  /**
+   * Connect to host from quick search
+   */
+  connectFromQuickSearch(host: HostItem): void {
+    this.closeQuickSearch();
+    this.connectSsh(host);
+  }
+
+  // ==================== View Mode ====================
+
+  /**
+   * Toggle between grid and compact view modes
+   */
+  toggleViewMode(): void {
+    this.config.viewMode = this.config.viewMode === 'grid' ? 'compact' : 'grid';
+    this.warpgateService.saveConfig({ viewMode: this.config.viewMode });
+  }
+
+  // ==================== Pin/Favorites ====================
+
+  /**
+   * Get unique key for a host (serverId:targetName)
+   */
+  getHostKey(host: HostItem): string {
+    return `${host.server.id}:${host.target.name}`;
+  }
+
+  /**
+   * Check if a host is pinned
+   */
+  isHostPinned(host: HostItem): boolean {
+    const key = this.getHostKey(host);
+    return this.config.pinnedHosts.includes(key);
+  }
+
+  /**
+   * Toggle pin status for a host
+   */
+  togglePin(host: HostItem): void {
+    const key = this.getHostKey(host);
+    const pinnedHosts = [...this.config.pinnedHosts];
+
+    if (pinnedHosts.includes(key)) {
+      // Unpin
+      const index = pinnedHosts.indexOf(key);
+      pinnedHosts.splice(index, 1);
+    } else {
+      // Pin
+      pinnedHosts.push(key);
+    }
+
+    this.config.pinnedHosts = pinnedHosts;
+    this.warpgateService.saveConfig({ pinnedHosts });
+
+    // Re-filter to update sort order
+    this.filterHosts();
   }
 }

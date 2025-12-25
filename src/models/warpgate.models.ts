@@ -114,6 +114,9 @@ export interface WarpgateSshOptions {
 /** Authentication method preference */
 export type WarpgateAuthMethod = 'ticket' | 'password' | 'auto';
 
+/** View mode for hosts panel */
+export type HostsViewMode = 'grid' | 'compact';
+
 /** Plugin configuration structure */
 export interface WarpgatePluginConfig {
   servers: WarpgateServerConfig[];
@@ -125,6 +128,10 @@ export interface WarpgatePluginConfig {
   authMethod: WarpgateAuthMethod;
   /** Enable debug logging to console */
   debugMode: boolean;
+  /** Pinned host keys (format: "serverId:targetName") */
+  pinnedHosts: string[];
+  /** View mode for hosts panel */
+  viewMode: HostsViewMode;
 }
 
 /** Default plugin configuration */
@@ -136,6 +143,8 @@ export const DEFAULT_WARPGATE_CONFIG: WarpgatePluginConfig = {
   sortBy: 'name',
   authMethod: 'auto',
   debugMode: false,
+  pinnedHosts: [],
+  viewMode: 'grid',
 };
 
 /** API error response */

@@ -27,6 +27,8 @@ describe('Warpgate Models', () => {
         sortBy: 'name',
         authMethod: 'auto',
         debugMode: false,
+        pinnedHosts: [],
+        viewMode: 'grid',
       });
     });
 
@@ -191,6 +193,8 @@ describe('Warpgate Models', () => {
         sortBy: 'group',
         authMethod: 'auto',
         debugMode: false,
+        pinnedHosts: [],
+        viewMode: 'grid',
       };
 
       expect(config.servers).toHaveLength(1);
