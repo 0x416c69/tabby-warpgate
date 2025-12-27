@@ -5,6 +5,8 @@
 
 A comprehensive Warpgate SSH gateway integration for [Tabby Terminal](https://tabby.sh/). Connect to SSH hosts through Warpgate with one click - similar to Termius but integrated directly into Tabby.
 
+![Screenshot](./screenshot.png)
+
 ## Features
 
 - **Multiple Warpgate Server Support** - Connect to multiple Warpgate instances simultaneously
