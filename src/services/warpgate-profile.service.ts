@@ -163,7 +163,7 @@ export class WarpgateProfileProvider extends ProfileProvider<WarpgateSSHProfile>
       isTemplate: false,
       options: {
         host: ticketDetails.host,
-        port: ticketDetails.port,
+        port: ticketDetails.port === 8888 ? 2222 : ticketDetails.port,
         user: ticketDetails.username,
         auth: 'password',
         password: 'x',
