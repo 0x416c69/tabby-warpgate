@@ -1,6 +1,6 @@
 {
   "name": "tabby-warpgate",
-  "version": "1.0.2",
+  "version": "1.0.3",
   "description": "Warpgate SSH gateway integration for Tabby - connect to SSH hosts through Warpgate with one click",
   "keywords": [
     "tabby-plugin",
@@ -72,9 +72,12 @@
     "tabby-terminal": "*"
   },
   "peerDependenciesMeta": {
-    "tabby-core": { "optional": false },
-    "tabby-settings": { "optional": false },
-    "tabby-ssh": { "optional": false },
+    "@angular/common": { "optional": true },
+    "@angular/core": { "optional": true },
+    "@angular/forms": { "optional": true },
+    "tabby-core": { "optional": true },
+    "tabby-settings": { "optional": true },
+    "tabby-ssh": { "optional": true },
     "tabby-terminal": { "optional": true }
   },
   "repository": {
