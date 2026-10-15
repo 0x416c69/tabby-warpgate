@@ -1,96 +1,200 @@
-# Tabby Warpgate Plugin
+<div align="center">
 
-[![npm version](https://badge.fury.io/js/tabby-warpgate.svg)](https://www.npmjs.com/package/tabby-warpgate)
-[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
+<img src="docs/images/logo.png" alt="Tabby Warpgate logo" width="112">
 
-A complete [Warpgate](https://github.com/warp-tech/warpgate) SSH gateway integration for [Tabby Terminal](https://tabby.sh/). Every SSH target you can reach through Warpgate shows up in one place and opens with a single click: no passwords, no `user:target@host` strings, no copying OTP codes.
+# Tabby Warpgate
 
-![Screenshot](./screenshot.png)
+### The Warpgate SSH client for the Tabby terminal
 
-## Features
+**Every server behind your [Warpgate](https://github.com/warp-tech/warpgate) bastion, one click away in [Tabby](https://tabby.sh/).**<br>
+No `user:target@host` strings. No passwords. No copying 2FA codes from your phone.
 
-**Connecting**
+[![npm version](https://img.shields.io/npm/v/tabby-warpgate?color=7c6cff&label=npm)](https://www.npmjs.com/package/tabby-warpgate)
+[![npm downloads](https://img.shields.io/npm/dm/tabby-warpgate?color=b06cff)](https://www.npmjs.com/package/tabby-warpgate)
+[![CI](https://github.com/0x416c69/tabby-warpgate/actions/workflows/ci.yml/badge.svg)](https://github.com/0x416c69/tabby-warpgate/actions/workflows/ci.yml)
+[![GitHub stars](https://img.shields.io/github/stars/0x416c69/tabby-warpgate?style=flat&color=f5b83d)](https://github.com/0x416c69/tabby-warpgate/stargazers)
+[![License: MIT](https://img.shields.io/badge/license-MIT-2ea44f.svg)](LICENSE)
+[![PRs welcome](https://img.shields.io/badge/PRs-welcome-ff69b4.svg)](CONTRIBUTING.md)
 
-- **One-click SSH** to any Warpgate target, authenticated with a fresh one-time ticket
-- **Quick connect from anywhere** (<kbd>Ctrl</kbd>+<kbd>Shift</kbd>+<kbd>K</kbd>) with pinned and recently used hosts first
-- **Open several hosts at once**, as separate tabs or side by side in a split layout
-- **Reliable reconnects**: reconnecting, duplicating, splitting and restoring tabs gets a new ticket automatically
-- **Automatic password and OTP** answers when tickets are not available
+[**Install**](#-install) · [Features](#-features) · [Screenshots](#-screenshots) · [How it works](#-how-authentication-works) · [FAQ](#-faq) · [Contributing](#-contributing)
+
+<br>
+
+<img src="docs/images/hero.png" alt="Tabby Warpgate hosts panel: Warpgate SSH targets grouped by server with tags, pinned hosts and recent connections" width="100%">
+
+</div>
+
+<br>
+
+**Tabby Warpgate** is a free, open-source [Tabby](https://tabby.sh/) plugin that turns your [Warpgate](https://github.com/warp-tech/warpgate) account into a full **SSH host manager**. Every SSH target you can reach through the Warpgate bastion (jump host) shows up automatically. You connect with one click using single-use tickets, or with password and **automatic TOTP two-factor codes**. On top of that you get tags, notes, colors, a snippet library, connection history, port forwarding and multi-host sessions: the comfort of a paid SSH client like Termius, for teams that put their servers behind Warpgate.
+
+## 💡 Why
+
+Warpgate is a great SSH gateway: one entry point, per-user roles, session recording, 2FA. Using it from a terminal is less fun. Every host needs a username like `alice:prod-db-01`, the password goes in every time, and then you reach for your phone to type the one-time code.
+
+| | Plain SSH profiles | **With Tabby Warpgate** |
+|---|---|---|
+| Adding hosts | Create a profile per target by hand | Every target you have access to appears automatically |
+| Logging in | Password + OTP code on every connection | One click, with a single-use ticket |
+| Reconnecting | Type everything again | A new ticket is created for you, also for duplicated, split and restored tabs |
+| Finding a host | Scroll through a profile list | Fuzzy search by name, `#tag`, notes or server, from any tab |
+| Repeated commands | Copy and paste | Snippet library, startup snippets, run on many hosts at once |
+| Several gateways | Separate profile sets | Any number of Warpgate servers side by side |
+
+**Made for** DevOps and SRE teams, platform engineers, MSPs and homelabbers who use Warpgate as their SSH bastion and Tabby as their terminal on Windows, macOS or Linux.
+
+<br>
+
+## ✨ Features
+
+<table>
+<tr>
+<td width="50%" valign="top">
+
+### ⚡ Connect
+
+- **One-click SSH** to any Warpgate target with a fresh one-time ticket
+- **Quick connect from anywhere** (<kbd>Ctrl</kbd>+<kbd>Shift</kbd>+<kbd>K</kbd>) with pinned and recent hosts first
+- **Open many hosts at once** in tabs or a split grid
+- **Reconnects that just work**: duplicate, split and restore tabs without a login prompt
+- **Password + TOTP fallback**, 2FA codes answered automatically
 - **Multiple Warpgate servers** at the same time
 
-**Organizing**
+</td>
+<td width="50%" valign="top">
 
-- **Per-host aliases, tags, notes and colors**
-- **Search** across names, descriptions, servers, groups, tags (`#prod`) and notes
-- **Pinned hosts**, server and tag filters, card and list layouts
-- **Connection history** with a "Jump back in" strip and a timeline of recent sessions
+### 🗂️ Organize
 
-**Automating**
+- **Aliases, tags, notes and colors** per host
+- **Search** across names, descriptions, servers, groups, `#tags` and notes
+- **Pinned hosts**, server and tag filters
+- **Card and list layouts**, collapsible groups
+- **"Jump back in"** row and a full connection history
 
-- **Snippet library**: save commands and run them in an open session, in all open sessions, or on hosts you pick
-- **Startup snippets** that run automatically when you connect to a host
-- **Port forwarding** rules per host (local, remote and dynamic/SOCKS)
-- **Agent forwarding, X11 forwarding and keepalive** per server, overridable per host
+</td>
+</tr>
+<tr>
+<td width="50%" valign="top">
 
-**Everything else**
+### 🧩 Automate
 
-- Polished UI that follows your Tabby color scheme (dark, light and custom themes)
-- Auto-refresh of host lists, automatic re-login when the Warpgate web session expires
-- One-time ticket cleanup on the Warpgate server
-- Works on Tabby Desktop (Windows, macOS, Linux)
+- **Snippet library**: run commands in one session, all sessions, or on hosts you pick
+- **Startup snippets** that run as soon as the shell is ready
+- **SSH port forwarding** per host: local, remote and dynamic (SOCKS proxy)
+- **Agent forwarding, X11 and keepalive** per server, overridable per host
 
-## Installation
+</td>
+<td width="50%" valign="top">
 
-### From Plugin Manager (Recommended)
+### 🎨 Feels native
 
-1. Open Tabby
-2. Go to **Settings → Plugins**
-3. Search for "warpgate"
-4. Click **Install**
+- Follows your Tabby color scheme: dark, light and custom themes
+- Keyboard first: every action has a shortcut
+- Auto-refresh of host lists and silent re-login when the web session expires
+- Cleans up its own used tickets on the Warpgate server
+- Windows, macOS and Linux
 
-### Manual Installation
+</td>
+</tr>
+</table>
+
+<br>
+
+## 📸 Screenshots
+
+<table>
+<tr>
+<td width="50%">
+<img src="docs/images/quick-search.png" alt="Quick connect search for Warpgate SSH hosts in Tabby, filtering by name and tag">
+<p align="center"><b>Quick connect</b><br><sub>Fuzzy search hosts, tags and notes. <kbd>Enter</kbd> connects.</sub></p>
+</td>
+<td width="50%">
+<img src="docs/images/host-editor.png" alt="SSH host editor with alias, color, tags, notes and startup snippet">
+<p align="center"><b>Make every host yours</b><br><sub>Alias, color, tags, notes, startup snippet, forwarding.</sub></p>
+</td>
+</tr>
+<tr>
+<td width="50%">
+<img src="docs/images/snippets.png" alt="SSH snippet library with commands that run in open sessions or on several hosts">
+<p align="center"><b>Snippet library</b><br><sub>Run in one session, all of them, or connect and run.</sub></p>
+</td>
+<td width="50%">
+<img src="docs/images/multi-select.png" alt="Selecting several SSH hosts to open in tabs or a split view">
+<p align="center"><b>Open several hosts at once</b><br><sub>As tabs or in a split grid inside one tab.</sub></p>
+</td>
+</tr>
+<tr>
+<td width="50%">
+<img src="docs/images/history.png" alt="SSH connection history grouped by day">
+<p align="center"><b>Connection history</b><br><sub>Pick up exactly where you left off.</sub></p>
+</td>
+<td width="50%">
+<img src="docs/images/light-theme.png" alt="Tabby Warpgate hosts panel in a light Tabby theme">
+<p align="center"><b>Follows your theme</b><br><sub>Colors come from your Tabby color scheme.</sub></p>
+</td>
+</tr>
+<tr>
+<td colspan="2">
+<img src="docs/images/settings.png" alt="Warpgate server settings with connection status, OTP setup and authentication mode">
+<p align="center"><b>Servers and settings</b><br><sub>Status at a glance, one-click OTP setup, per-server SSH defaults.</sub></p>
+</td>
+</tr>
+</table>
+
+<br>
+
+## 📦 Install
+
+**From Tabby (recommended)**
+
+1. Open **Settings → Plugins**
+2. Search for **warpgate**
+3. Click **Install** and restart Tabby
+
+<details>
+<summary><b>Manual installation</b></summary>
 
 ```bash
-# Clone the repository
 git clone https://github.com/0x416c69/tabby-warpgate.git
 cd tabby-warpgate
-
-# Install dependencies and build
 npm install
 npm run build
 
-# Install to Tabby's plugins directory
-# Windows: %APPDATA%\tabby\plugins
-# macOS: ~/Library/Application Support/tabby/plugins
-# Linux: ~/.config/tabby/plugins
-
+# Then install it into Tabby's plugins directory:
+#   Windows: %APPDATA%\tabby\plugins
+#   macOS:   ~/Library/Application Support/tabby/plugins
+#   Linux:   ~/.config/tabby/plugins
 cd /path/to/tabby/plugins
 npm install /path/to/tabby-warpgate
 ```
 
-## Quick Start
+</details>
 
-### Adding a Warpgate Server
+## 🚀 Connect to Warpgate in a minute
 
-1. Open **Settings → Warpgate**
-2. Click **Add server** and fill in:
-   - **Name**: a friendly name
-   - **URL**: the Warpgate web URL, e.g. `https://warpgate.example.com`
-   - **Username** and **Password** of your Warpgate account
-   - **OTP secret** (optional): your TOTP secret, so two-factor prompts are answered automatically
-3. Click **Test connection**. If Warpgate asks for a one-time code, enter it and test again
-4. Click **Add server**
+1. Open **Settings → Warpgate** and click **Add server**
+2. Enter a name, the Warpgate web URL (e.g. `https://warpgate.example.com`), your username and password
+3. Optional: paste your **OTP secret** so two-factor prompts are answered for you
+4. Click **Test connection**, then **Add server**
 
-The SSH address and port are detected from Warpgate automatically.
+That's it. Press <kbd>Ctrl</kbd>+<kbd>Shift</kbd>+<kbd>H</kbd> to open the hosts panel, or <kbd>Ctrl</kbd>+<kbd>Shift</kbd>+<kbd>K</kbd> from any tab to jump straight to a host. The SSH address and port are read from Warpgate, so there's nothing else to configure.
 
-### Connecting to Hosts
+<br>
 
-- **Hosts panel**: click the Warpgate button in the toolbar (or press <kbd>Ctrl</kbd>+<kbd>Shift</kbd>+<kbd>H</kbd>), then click any host
-- **Quick connect**: press <kbd>Ctrl</kbd>+<kbd>Shift</kbd>+<kbd>K</kbd> anywhere in Tabby, type a few letters, press <kbd>Enter</kbd>
-- **In-panel search**: press <kbd>Ctrl</kbd>+<kbd>K</kbd> while the hosts panel is focused
+## 📖 Usage
+
+<details>
+<summary><b>Connecting to hosts</b></summary>
+
+- **Hosts panel**: click the Warpgate button in the toolbar (or <kbd>Ctrl</kbd>+<kbd>Shift</kbd>+<kbd>H</kbd>) and click a host
+- **Quick connect**: <kbd>Ctrl</kbd>+<kbd>Shift</kbd>+<kbd>K</kbd> anywhere in Tabby, type a few letters, <kbd>Enter</kbd>
+- **In-panel search**: <kbd>Ctrl</kbd>+<kbd>K</kbd> while the hosts panel is focused
 - **Tabby's profile selector**: Warpgate hosts are listed as profiles too and connect the same way
 
-### Opening Several Hosts at Once
+</details>
+
+<details>
+<summary><b>Opening several hosts at once</b></summary>
 
 1. Click the **select** button in the hosts panel (or <kbd>Ctrl</kbd>-click a host)
 2. Pick hosts, or use **Select group** / **Select all**
@@ -98,7 +202,10 @@ The SSH address and port are detected from Warpgate automatically.
 
 In split mode the hosts are arranged in a grid inside one tab. Use Tabby's "Focus all panes" hotkey to type into all of them at once.
 
-### Customizing a Host
+</details>
+
+<details>
+<summary><b>Customizing a host</b></summary>
 
 Hover a host and click the settings button to open the host editor:
 
@@ -115,7 +222,10 @@ Hover a host and click the settings button to open the host editor:
 
 Port forwarding goes through Warpgate's SSH connection, so it only works for the forwarding types your Warpgate version supports.
 
-### Snippets
+</details>
+
+<details>
+<summary><b>Snippets</b></summary>
 
 Open the **Snippets** section of the hosts panel to build a library of commands. Each snippet can be run:
 
@@ -126,56 +236,10 @@ Open the **Snippets** section of the hosts panel to build a library of commands.
 
 Multi-line snippets are sent line by line.
 
-## How Authentication Works
+</details>
 
-### One-Time Tickets (default)
-
-1. When you add a server, the plugin stores your credentials in Tabby's configuration and logs in to the Warpgate web API
-2. For every SSH connection the plugin creates a **one-time ticket** for the target and uses `ticket-<secret>` as SSH username, so no password prompt appears
-3. Tickets are single use and expire after 10 minutes if they are never used. Reconnecting, duplicating, splitting or restoring a tab creates a new ticket right before connecting
-4. Used and expired tickets created by the plugin are cleaned up on the Warpgate server during auto-refresh
-
-Creating tickets requires ticket permissions (admin) on Warpgate.
-
-### Password + OTP (fallback)
-
-If tickets are not available, the plugin connects with `warpgate_user:target_name` and your stored password. When Warpgate asks for a one-time code, the plugin generates it from your OTP secret and answers the prompt automatically. Without an OTP secret, Tabby asks you for the code.
-
-The **Authentication** preference controls this:
-
-| Mode | Behavior |
-|------|----------|
-| **Automatic** | Tickets when possible, password as fallback (shows one notice per server when tickets are not permitted) |
-| **Tickets only** | Never falls back; connecting fails with a clear error if no ticket can be created |
-| **Password only** | Always uses password + OTP |
-
-### OTP Setup
-
-On a connected server in **Settings → Warpgate**, click **Set up OTP**. The plugin registers a new TOTP secret with your Warpgate account (self-service API) and stores it for automatic login. The secret is shown once so you can add it to an authenticator app for logging in to the Warpgate web UI. **Disable OTP** removes it again.
-
-If OTP is already configured on your account, paste the existing secret into the server's **OTP secret** field instead.
-
-### Session Handling
-
-The plugin reuses its Warpgate web session and logs in again automatically when the session expires (for example after Warpgate's session timeout), so ticket creation and host refreshes keep working.
-
-### Security Note
-
-Credentials (passwords and OTP secrets) are stored in Tabby's configuration file (`config.yaml`), like Tabby's own SSH passwords. Enable Tabby's **Vault** to encrypt them, keep the file private and do not share it.
-
-## Configuration Options
-
-| Option | Description |
-|--------|-------------|
-| **Auto-refresh** | How often host lists are refreshed (disabled, 30s, 1m, 5m, 10m) |
-| **Sort hosts by** | Name, recently used, server, group or type |
-| **Authentication** | Automatic, tickets only or password only |
-| **Group hosts by server** | Group by server and Warpgate group, or by Warpgate group only |
-| **Show hosts of offline servers** | Keep showing hosts of servers that are currently unreachable |
-| **Debug logging** | Detailed logs in the developer console (secrets are never logged) |
-| **SSH defaults** (per server) | Agent forwarding, X11 forwarding and keepalive for all hosts of a server |
-
-## Keyboard Shortcuts
+<details>
+<summary><b>Keyboard shortcuts</b></summary>
 
 | Shortcut | Action |
 |----------|--------|
@@ -187,93 +251,167 @@ Credentials (passwords and OTP secrets) are stored in Tabby's configuration file
 
 All global shortcuts can be changed in **Settings → Hotkeys** ("Warpgate: …"). A "Refresh hosts" hotkey is available there too.
 
-## Development
+</details>
 
-### Prerequisites
+<details>
+<summary><b>Configuration options</b></summary>
 
-- Node.js 18+
-- npm
+| Option | Description |
+|--------|-------------|
+| **Auto-refresh** | How often host lists are refreshed (disabled, 30s, 1m, 5m, 10m) |
+| **Sort hosts by** | Name, recently used, server, group or type |
+| **Authentication** | Automatic, tickets only or password only |
+| **Group hosts by server** | Group by server and Warpgate group, or by Warpgate group only |
+| **Show hosts of offline servers** | Keep showing hosts of servers that are currently unreachable |
+| **Debug logging** | Detailed logs in the developer console (secrets are never logged) |
+| **SSH defaults** (per server) | Agent forwarding, X11 forwarding and keepalive for all hosts of a server |
 
-### Setup
+</details>
 
-```bash
-# Install dependencies
-npm install
+<br>
 
-# Build
-npm run build
+## 🔐 How authentication works
 
-# Watch mode (for development)
-npm run watch
+**One-time tickets (default).** For every SSH connection the plugin asks Warpgate for a single-use ticket for that target and logs in as `ticket-<secret>`, so no password prompt appears. Tickets expire after 10 minutes if unused, and reconnecting, duplicating, splitting or restoring a tab creates a new one right before connecting. Used and expired tickets created by the plugin are removed from the server during auto-refresh. Creating tickets requires ticket permissions (admin) on Warpgate.
 
-# Run tests
-npm test
+**Password + OTP (fallback).** Without ticket permissions the plugin connects as `warpgate_user:target_name` with your stored password. When Warpgate asks for a one-time code, it is generated from your TOTP secret and sent automatically. Without an OTP secret, Tabby asks you for the code.
 
-# Lint
-npm run lint
-```
+| Authentication mode | Behavior |
+|------|----------|
+| **Automatic** | Tickets when possible, password as fallback (one notice per server when tickets aren't permitted) |
+| **Tickets only** | Never falls back; connecting fails with a clear error if no ticket can be created |
+| **Password only** | Always password + OTP |
 
-### Project Structure
+<details>
+<summary><b>OTP setup, sessions and security</b></summary>
 
-```
-tabby-warpgate/
-├── src/
-│   ├── api/                 # Warpgate HTTP API client
-│   ├── components/          # Angular components (hosts panel, editors, settings)
-│   ├── models/              # TypeScript interfaces and defaults
-│   ├── providers/           # Tabby providers (config, hotkeys, SSH tab handler, tab recovery)
-│   ├── services/            # Services (servers, profiles, connections, host settings, snippets, history)
-│   ├── utils/               # Utilities (TOTP, profile IDs, prompt detection)
-│   ├── __tests__/           # Unit tests
-│   └── index.ts             # Plugin entry point
-├── dist/                    # Build output
-├── package.json
-├── tsconfig.json
-├── webpack.config.js
-└── jest.config.js
-```
+**OTP setup.** On a connected server in **Settings → Warpgate**, click **Set up OTP**. The plugin registers a new TOTP secret with your Warpgate account through the self-service API and stores it for automatic login. The secret is shown once so you can also add it to an authenticator app for the Warpgate web UI. **Disable OTP** removes it again. If OTP is already configured on your account, paste the existing secret into the server's **OTP secret** field instead.
 
-### Testing Your Plugin
+**Sessions.** The plugin reuses its Warpgate web session and logs in again automatically when it expires, so ticket creation and host refreshes keep working.
 
-```bash
-# Run Tabby with your plugin in development
-# The path should be the parent directory containing your plugin folder
+**Security.** Passwords and OTP secrets are stored in Tabby's configuration file (`config.yaml`), like Tabby's own SSH passwords. Enable Tabby's **Vault** to encrypt them, and keep the file private.
 
-# Windows PowerShell
-$env:TABBY_PLUGINS = (Get-Item .).Parent.FullName; tabby --debug
+</details>
 
-# Linux/macOS
-TABBY_PLUGINS=$(dirname $(pwd)) tabby --debug
-```
-
-## Troubleshooting
-
-### Connection Issues
+<details>
+<summary><b>Troubleshooting</b></summary>
 
 | Problem | Solution |
 |---------|----------|
 | "Connection refused" | Check that Warpgate is running and the URL is correct |
 | "Invalid credentials" | Verify username and password |
 | "Additional authentication required (Sso)" | Your Warpgate policy requires a login method the plugin cannot automate (SSO, web approval) |
-| "No hosts yet" | Ensure your Warpgate user has roles assigned to SSH targets |
+| "No hosts yet" | Make sure your Warpgate user has roles assigned to SSH targets |
 | "Certificate error" | Enable "Trust self-signed certificates" for the server |
 | "Tickets are not available" | Your account cannot create tickets; the password fallback is used |
 | Port forward does not work | Check that your Warpgate version supports that forwarding type |
 
-### Plugin Not Loading
+**Plugin not loading?**
 
-1. Ensure the plugin is installed via npm (not just copied)
-2. Check `%APPDATA%\tabby\plugins\package.json` - the plugin should be listed
-3. Verify `dist/index.js` exists
-4. Open DevTools (Ctrl+Shift+I) and check for errors
+1. Make sure the plugin was installed with npm (not just copied)
+2. Check that it is listed in `plugins/package.json` in Tabby's config directory
+3. Verify that `dist/index.js` exists
+4. Open DevTools (<kbd>Ctrl</kbd>+<kbd>Shift</kbd>+<kbd>I</kbd>) and look for errors
 
-### Debug Mode
+Enable **Debug logging** in Settings → Warpgate for detailed logs in the developer console.
 
-Enable **Debug logging** in Settings → Warpgate to see detailed logs in the developer console.
+</details>
 
-## API Reference
+<br>
 
-The plugin exports classes that can be used by other plugins:
+## ❓ FAQ
+
+<details>
+<summary><b>What is Warpgate?</b></summary>
+
+[Warpgate](https://github.com/warp-tech/warpgate) is an open-source smart bastion host (jump host) for SSH, HTTPS, MySQL and PostgreSQL. It sits in front of your servers, handles authentication, 2FA and access roles, and records sessions, all without installing anything on the servers or the client.
+
+</details>
+
+<details>
+<summary><b>What is Tabby?</b></summary>
+
+[Tabby](https://tabby.sh/) (formerly Terminus) is a free, cross-platform terminal emulator and SSH client for Windows, macOS and Linux with tabs, split panes, an SFTP browser and a plugin system.
+
+</details>
+
+<details>
+<summary><b>How do I connect to Warpgate from Tabby?</b></summary>
+
+Install this plugin, add your Warpgate server under **Settings → Warpgate**, and click any host. Without the plugin you would create an SSH profile per target with the username `warpgate_user:target_name` and type your password and OTP code on every login.
+
+</details>
+
+<details>
+<summary><b>Is this a Termius alternative?</b></summary>
+
+For servers behind Warpgate, yes. You get a host list with tags, notes and colors, quick connect, a snippet library, connection history, port forwarding and multi-host sessions, all free and open source, inside a terminal you already use.
+
+</details>
+
+<details>
+<summary><b>Do I need to be a Warpgate admin?</b></summary>
+
+No. One-click ticket logins need ticket permissions, but without them the plugin logs in with your password and answers the 2FA prompt for you.
+
+</details>
+
+<details>
+<summary><b>Does it work with Warpgate 2FA / OTP?</b></summary>
+
+Yes. Store your TOTP secret and codes are generated and entered automatically, or let the plugin set up OTP on your account with one click.
+
+</details>
+
+<details>
+<summary><b>Is it free?</b></summary>
+
+Yes, it's MIT licensed. No account, no subscription, no telemetry.
+
+</details>
+
+<br>
+
+## 🗺️ Roadmap
+
+Ideas we'd love help with. Open an issue if you want to pick one up or have a better idea:
+
+- [ ] HTTP targets: open Warpgate web targets in the browser with one click
+- [ ] Database targets (MySQL / PostgreSQL) through a local tunnel
+- [ ] SSO and web-approval logins
+- [ ] Import and export of host settings and snippets
+- [ ] Snippet variables (prompted placeholders like `{{service}}`)
+- [ ] Tabby Web support
+
+<br>
+
+## 🤝 Contributing
+
+Contributions of every size are welcome: bug reports, ideas, docs, translations, code. **We're also looking for co-maintainers.** If you use Warpgate every day and want to help shape this plugin, [open an issue](https://github.com/0x416c69/tabby-warpgate/issues/new/choose) and say hi.
+
+```bash
+git clone https://github.com/0x416c69/tabby-warpgate.git
+cd tabby-warpgate
+npm install
+npm run watch     # rebuild on change
+npm test          # unit tests
+npm run lint
+```
+
+Run Tabby with your local build:
+
+```bash
+# Linux / macOS (run from the plugin folder)
+TABBY_PLUGINS=$(dirname $(pwd)) tabby --debug
+
+# Windows PowerShell
+$env:TABBY_PLUGINS = (Get-Item .).Parent.FullName; tabby --debug
+```
+
+See [CONTRIBUTING.md](CONTRIBUTING.md) for the project layout and guidelines, and [TESTING.md](TESTING.md) for the test setup.
+
+<details>
+<summary><b>Using the plugin from another plugin</b></summary>
 
 ```typescript
 import {
@@ -289,26 +427,26 @@ import {
 } from 'tabby-warpgate';
 ```
 
-## Contributing
+</details>
 
-1. Fork the repository
-2. Create a feature branch (`git checkout -b feature/amazing-feature`)
-3. Make your changes
-4. Run tests (`npm test`)
-5. Commit your changes (`git commit -m 'Add amazing feature'`)
-6. Push to the branch (`git push origin feature/amazing-feature`)
-7. Open a Pull Request
+<br>
 
-## License
+## ⭐ Star history
 
-MIT License - see [LICENSE](LICENSE) file for details.
+If this plugin saves you a few logins a day, a star helps other Warpgate users find it.
+
+<a href="https://star-history.com/#0x416c69/tabby-warpgate&Date">
+  <picture>
+    <source media="(prefers-color-scheme: dark)" srcset="https://api.star-history.com/svg?repos=0x416c69/tabby-warpgate&type=Date&theme=dark">
+    <img alt="Tabby Warpgate GitHub star history chart" src="https://api.star-history.com/svg?repos=0x416c69/tabby-warpgate&type=Date" width="600">
+  </picture>
+</a>
 
 ## Credits
 
-- [Tabby Terminal](https://tabby.sh/) - The amazing terminal emulator
-- [Warpgate](https://github.com/warp-tech/warpgate) - Smart SSH bastion host
+- [Tabby](https://tabby.sh/), the terminal this plugin lives in
+- [Warpgate](https://github.com/warp-tech/warpgate), the smart SSH bastion that makes it possible
 
-## Support
+## License
 
-- [GitHub Issues](https://github.com/0x416c69/tabby-warpgate/issues)
-- [Tabby Discord](https://discord.gg/tabby)
+[MIT](LICENSE)

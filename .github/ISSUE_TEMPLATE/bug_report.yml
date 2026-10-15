@@ -1,0 +1,50 @@
+name: Bug report
+description: Something doesn't work as expected
+labels: [bug]
+body:
+  - type: textarea
+    id: what
+    attributes:
+      label: What happened?
+      description: What did you do, what did you expect, and what happened instead?
+    validations:
+      required: true
+  - type: textarea
+    id: steps
+    attributes:
+      label: Steps to reproduce
+      placeholder: |
+        1. Open the hosts panel
+        2. Click ...
+  - type: input
+    id: plugin
+    attributes:
+      label: Plugin version
+    validations:
+      required: true
+  - type: input
+    id: tabby
+    attributes:
+      label: Tabby version
+    validations:
+      required: true
+  - type: input
+    id: warpgate
+    attributes:
+      label: Warpgate version
+  - type: dropdown
+    id: os
+    attributes:
+      label: Operating system
+      options: [Windows, macOS, Linux]
+  - type: dropdown
+    id: auth
+    attributes:
+      label: Authentication mode
+      options: [Automatic, Tickets only, Password only, Not sure]
+  - type: textarea
+    id: logs
+    attributes:
+      label: Console logs
+      description: Enable Debug logging in Settings → Warpgate, open DevTools (Ctrl+Shift+I) and paste the relevant lines. Remove anything you don't want to share.
+      render: shell

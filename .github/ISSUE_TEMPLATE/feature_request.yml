@@ -1,0 +1,21 @@
+name: Feature request
+description: Suggest an idea for the plugin
+labels: [enhancement]
+body:
+  - type: textarea
+    id: problem
+    attributes:
+      label: What are you trying to do?
+      description: Describe the problem or workflow, not only the solution.
+    validations:
+      required: true
+  - type: textarea
+    id: solution
+    attributes:
+      label: How should it work?
+  - type: checkboxes
+    id: help
+    attributes:
+      label: Contributing
+      options:
+        - label: I'd like to help build this

@@ -1,16 +1,25 @@
 {
   "name": "tabby-warpgate",
   "version": "1.0.2",
-  "description": "Warpgate SSH gateway integration for Tabby - connect to SSH hosts through Warpgate with one click",
+  "description": "Warpgate SSH client for Tabby: one-click logins through your Warpgate bastion, automatic TOTP 2FA, host tags, snippets, history and port forwarding",
   "keywords": [
     "tabby-plugin",
+    "tabby",
     "warpgate",
     "ssh",
-    "bastion",
-    "gateway",
-    "terminal",
     "ssh-client",
-    "jump-host"
+    "ssh-manager",
+    "host-manager",
+    "bastion",
+    "bastion-host",
+    "jump-host",
+    "ssh-gateway",
+    "totp",
+    "2fa",
+    "snippets",
+    "port-forwarding",
+    "terminal",
+    "devops"
   ],
   "author": {
     "name": "AliAssassiN",
