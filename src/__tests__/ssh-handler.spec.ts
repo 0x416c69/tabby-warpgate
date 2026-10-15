@@ -118,6 +118,7 @@ describe('WarpgateSshHandler', () => {
   let warpgate: ReturnType<typeof createWarpgateMock>;
   let hostSettings: WarpgateHostSettingsService;
   let history: { recordConnection: jest.Mock };
+  let tabsService: { create: (params: any) => any };
   let handler: WarpgateSshHandler;
 
   beforeEach(() => {
@@ -125,7 +126,11 @@ describe('WarpgateSshHandler', () => {
     warpgate = createWarpgateMock();
     hostSettings = new WarpgateHostSettingsService(warpgate as unknown as WarpgateService);
     history = { recordConnection: jest.fn() };
-    handler = new WarpgateSshHandler(app as any, warpgate as unknown as WarpgateService, hostSettings, history as any);
+    // Like Tabby's TabsService.create(): instantiates the tab and assigns its inputs
+    tabsService = { create: (params: any) => Object.assign(new params.type(params.inputs.profile), params.inputs) };
+    handler = new WarpgateSshHandler(
+      app as any, warpgate as unknown as WarpgateService, hostSettings, history as any, tabsService as any
+    );
   });
 
   describe('tab detection', () => {
@@ -164,9 +169,32 @@ describe('WarpgateSshHandler', () => {
       const tab = new FakeSshTab(sshProfile('warpgate:wg-1:web'));
       app.tabs = [new FakeSplitTab([tab])];
 
-      const lateHandler = new WarpgateSshHandler(app as any, warpgate as unknown as WarpgateService, hostSettings, history as any);
+      const lateHandler = new WarpgateSshHandler(
+        app as any, warpgate as unknown as WarpgateService, hostSettings, history as any, { create: jest.fn() } as any
+      );
 
       expect(lateHandler.isWarpgateTab(tab)).toBe(true);
+    });
+
+    it('should attach to tabs as soon as Tabby creates them, like panes of a restored split tab', async () => {
+      // Restored split panes are created and connected without tabOpened$ or tabAdded$
+      const tab = tabsService.create({
+        type: FakeSshTab,
+        inputs: { profile: sshProfile('warpgate:wg-1:web:ticket', { user: 'ticket-already-used' }) },
+      });
+
+      expect(handler.isWarpgateTab(tab)).toBe(true);
+      await tab.initializeSession();
+      expect(tab.initializeCalls[0].user).toBe('ticket-fresh');
+    });
+
+    it('should hook tab creation only once', () => {
+      const create = tabsService.create;
+      new WarpgateSshHandler(app as any, warpgate as unknown as WarpgateService, hostSettings, history as any, tabsService as any);
+      const tab = tabsService.create({ type: FakeSshTab, inputs: { profile: sshProfile('warpgate:wg-1:web') } });
+
+      expect(tabsService.create).toBe(create);
+      expect(handler.isWarpgateTab(tab)).toBe(true);
     });
 
     it('should list open Warpgate tabs', () => {
@@ -263,6 +291,43 @@ describe('WarpgateSshHandler', () => {
         scripts: [{ expect: '', send: 'uptime' }],
       }));
       expect(tab.initializeCalls[1]).toEqual(expect.objectContaining({ agentForward: false, scripts: [] }));
+    });
+
+    it('should apply host settings to split and duplicated tabs', async () => {
+      // Like Tabby's ConfigProxy: non-configurable accessors, setting a default deletes the key
+      const configProxy = (real: Record<string, any>, defaults: Record<string, any>) => {
+        const proxy: Record<string, any> = {};
+        for (const key of Object.keys(defaults)) {
+          Object.defineProperty(proxy, key, {
+            enumerable: true,
+            configurable: false,
+            get: () => (real[key] !== undefined ? real[key] : defaults[key]),
+            set: (value: any) => {
+              if (value === defaults[key]) {
+                delete real[key];
+              } else {
+                real[key] = value;
+              }
+            },
+          });
+        }
+        return proxy;
+      };
+      const defaults = { host: '', port: 22, user: '', auth: null, password: null, agentForward: false, x11: false };
+      const original = configProxy({ host: 'wg.example.com', port: 2222, user: 'ticket-used', agentForward: true }, defaults);
+      // Tabby's split and duplicate wrap the original tab's proxy in another proxy
+      const layered = configProxy(original, defaults);
+      const tab = new FakeSshTab({ id: 'warpgate:wg-1:web:ticket', type: 'ssh', name: 'web', options: layered });
+      app.tabOpened$.next(tab);
+
+      await tab.initializeSession();
+
+      expect(tab.initializeCalls[0]).toEqual(expect.objectContaining({
+        user: 'ticket-fresh',
+        agentForward: false,
+        x11: false,
+      }));
+      expect(original.agentForward).toBe(true);
     });
 
     it('should send queued scripts once after the next connection', async () => {

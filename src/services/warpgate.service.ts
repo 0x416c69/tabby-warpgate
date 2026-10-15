@@ -113,7 +113,7 @@ export class WarpgateService {
   /** Map of active sessions by server ID */
   private sessions: Map<string, WarpgateSession> = new Map();
 
-  /** Map of cached tickets by "serverId:targetName" key */
+  /** Tickets created by this plugin, by secret (a target can have several, one per connection) */
   private ticketCache: Map<string, WarpgateCachedTicket> = new Map();
 
   /** Secrets of tickets created by this plugin that have not been used for a connection yet */
@@ -121,6 +121,9 @@ export class WarpgateService {
 
   /** Servers on which the current user is not allowed to create tickets */
   private ticketsUnavailable = new Set<string>();
+
+  /** Servers where the user may not list tickets, so used tickets cannot be cleaned up */
+  private ticketListingDenied = new Set<string>();
 
   /** Map of server info (includes external_host) by server ID */
   private serverInfo: Map<string, WarpgateServerInfo> = new Map();
@@ -154,9 +157,6 @@ export class WarpgateService {
 
   /** Authentication locks to prevent concurrent logins for the same server */
   private authLocks = new Map<string, Promise<AuthResult>>();
-
-  /** Ticket creation locks to prevent multiple tickets for same target */
-  private ticketLocks = new Map<string, Promise<WarpgateTicketConnectionDetails | null>>();
 
   /** Temporary clients for test connections (to maintain session for OTP) */
   private testClients: Map<string, WarpgateApiClient> = new Map();
@@ -456,6 +456,7 @@ export class WarpgateService {
     this.sessions.delete(serverId);
     this.serverInfo.delete(serverId);
     this.ticketsUnavailable.delete(serverId);
+    this.ticketListingDenied.delete(serverId);
     this.clearServerTickets(serverId);
 
     const targets = this.targetsSubject.getValue();
@@ -572,6 +573,7 @@ export class WarpgateService {
 
       // A fresh login may come with different permissions, check ticket support again
       this.ticketsUnavailable.delete(serverId);
+      this.ticketListingDenied.delete(serverId);
 
       // Update server last connected time
       await this.updateServer(serverId, { lastConnected: new Date() });
@@ -742,6 +744,12 @@ export class WarpgateService {
 
     const result = await call(client);
     if (result.success || result.error?.status !== 401) {
+      return result;
+    }
+
+    // Warpgate also answers 401 when the user lacks a permission (e.g. creating tickets
+    // as a non-admin), only log in again when the session itself is gone
+    if (await client.isSessionValid()) {
       return result;
     }
 
@@ -996,36 +1004,21 @@ export class WarpgateService {
 
   /**
    * Create a one-time ticket for one-click SSH access
+   * Every call creates its own ticket: a ticket can only be used by one connection,
+   * so panes connecting to the same target at the same time must not share one
    * Returns null when a ticket could not be created (e.g. missing admin permissions)
    */
   async getOrCreateTicket(
     serverId: string,
     targetName: string
   ): Promise<WarpgateTicketConnectionDetails | null> {
-    const ticketKey = `${serverId}:${targetName}`;
-
-    // Prevent concurrent ticket creation for the same target
-    const existingLock = this.ticketLocks.get(ticketKey);
-    if (existingLock) {
-      log.debug(`Ticket creation already in progress for ${targetName}, waiting...`);
-      return existingLock;
-    }
-
     const server = this.getServer(serverId);
     if (!server || !this.clients.has(serverId)) {
       log.debug('getOrCreateTicket: server or client not found');
       return null;
     }
 
-    // Create lock for this ticket creation
-    const ticketPromise = this.doCreateTicket(serverId, targetName, server);
-    this.ticketLocks.set(ticketKey, ticketPromise);
-
-    try {
-      return await ticketPromise;
-    } finally {
-      this.ticketLocks.delete(ticketKey);
-    }
+    return this.doCreateTicket(serverId, targetName, server);
   }
 
   /**
@@ -1056,8 +1049,7 @@ export class WarpgateService {
     const endpoint = this.getSshEndpoint(serverId);
     if (result.success && result.data?.secret && client && endpoint) {
       const secret = result.data.secret;
-      const ticketKey = `${serverId}:${targetName}`;
-      this.ticketCache.set(ticketKey, {
+      this.ticketCache.set(secret, {
         serverId,
         targetName,
         secret,
@@ -1112,12 +1104,7 @@ export class WarpgateService {
       return false;
     }
     this.unusedTicketSecrets.delete(secret);
-
-    for (const [key, ticket] of this.ticketCache) {
-      if (ticket.secret === secret) {
-        this.ticketCache.delete(key);
-      }
-    }
+    this.ticketCache.delete(secret);
     return true;
   }
 
@@ -1156,10 +1143,7 @@ export class WarpgateService {
       }
 
       if (authMethod === 'ticket') {
-        this.showNotification(
-          'error',
-          `Cannot create ticket for ${targetName}. Ticket-only mode is enabled but ticket creation failed.`
-        );
+        this.showNotification('error', `Cannot connect to ${targetName}: ${this.describeTicketOnlyFailure(serverId)}`);
         return null;
       }
     }
@@ -1179,6 +1163,18 @@ export class WarpgateService {
   }
 
   /**
+   * Explain why a connection failed in ticket-only mode and what to do about it
+   */
+  describeTicketOnlyFailure(serverId: string): string {
+    const server = this.getServer(serverId);
+    if (server && this.ticketsUnavailable.has(serverId)) {
+      return `"${server.username}" is not allowed to create tickets on ${server.name}. ` +
+        'Set Authentication to "Automatic" in Settings → Warpgate to log in with your password instead.';
+    }
+    return 'No ticket could be created and Authentication is set to "Tickets only".';
+  }
+
+  /**
    * Check whether tickets are known to be unavailable for a server
    */
   areTicketsUnavailable(serverId: string): boolean {
@@ -1189,17 +1185,18 @@ export class WarpgateService {
    * Invalidate a cached ticket (call after use for one-time tickets)
    */
   invalidateTicket(serverId: string, targetName: string): void {
-    const ticketKey = `${serverId}:${targetName}`;
-    const ticket = this.ticketCache.get(ticketKey);
-
-    if (ticket) {
+    for (const ticket of this.ticketCache.values()) {
+      if (ticket.serverId !== serverId || ticket.targetName !== targetName) {
+        continue;
+      }
       if (ticket.usesLeft > 0) {
         ticket.usesLeft--;
       }
       if (ticket.usesLeft === 0) {
-        this.ticketCache.delete(ticketKey);
+        this.ticketCache.delete(ticket.secret);
         this.unusedTicketSecrets.delete(ticket.secret);
       }
+      return;
     }
   }
 
@@ -1207,9 +1204,9 @@ export class WarpgateService {
    * Clear all cached tickets for a server
    */
   clearServerTickets(serverId: string): void {
-    for (const [key, ticket] of this.ticketCache) {
-      if (key.startsWith(`${serverId}:`)) {
-        this.ticketCache.delete(key);
+    for (const ticket of [...this.ticketCache.values()]) {
+      if (ticket.serverId === serverId) {
+        this.ticketCache.delete(ticket.secret);
         this.unusedTicketSecrets.delete(ticket.secret);
       }
     }
@@ -1225,7 +1222,7 @@ export class WarpgateService {
    */
   async cleanupUsedTickets(serverId: string): Promise<number> {
     const client = this.clients.get(serverId);
-    if (!client || this.ticketsUnavailable.has(serverId)) {
+    if (!client || this.ticketsUnavailable.has(serverId) || this.ticketListingDenied.has(serverId)) {
       return 0;
     }
 
@@ -1234,6 +1231,11 @@ export class WarpgateService {
       const listResult = await this.callWithReauth(serverId, c => c.listTickets(), false);
       if (!listResult.success || !listResult.data) {
         log.debug('Failed to list tickets for cleanup:', listResult.error?.message);
+        const status = listResult.error?.status;
+        if (status === 401 || status === 403) {
+          // Not permitted for this user, do not ask again until the next login
+          this.ticketListingDenied.add(serverId);
+        }
         return 0;
       }
 

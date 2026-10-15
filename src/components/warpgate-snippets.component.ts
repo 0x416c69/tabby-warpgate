@@ -7,6 +7,7 @@ import { Component, ElementRef, EventEmitter, HostListener, Inject, OnDestroy, O
 import { Subscription } from 'rxjs';
 import { AppService, NotificationsService } from 'tabby-core';
 
+import { WarpgateService } from '../services/warpgate.service';
 import { WarpgateSnippetsService, snippetPreview } from '../services/snippets.service';
 import { WarpgateHostSettingsService, parseTags } from '../services/host-settings.service';
 import { WarpgateSshHandler } from '../providers/warpgate-ssh-handler.provider';
@@ -235,6 +236,7 @@ export class WarpgateSnippetsComponent implements OnInit, OnDestroy {
   constructor(
     @Inject(WarpgateSnippetsService) private snippetsService: WarpgateSnippetsService,
     @Inject(WarpgateHostSettingsService) private hostSettings: WarpgateHostSettingsService,
+    @Inject(WarpgateService) private warpgateService: WarpgateService,
     @Inject(WarpgateSshHandler) private sshHandler: WarpgateSshHandler,
     @Inject(AppService) private app: AppService,
     @Inject(NotificationsService) private notifications: NotificationsService,
@@ -297,8 +299,11 @@ export class WarpgateSnippetsComponent implements OnInit, OnDestroy {
     this.openSessions = this.sshHandler.getOpenWarpgateTabs().map(tab => {
       const target = this.sshHandler.getTabTarget(tab);
       const label = target ? this.hostSettings.getDisplayName(target.serverId, target.targetName) : tab.title;
+      const serverName = target ? this.warpgateService.getServer(target.serverId)?.name : undefined;
       const connected = !!tab.session?.open;
-      return { tab, label, detail: connected ? 'connected' : 'not connected' };
+      // Several sessions can show the same host, the server name tells them apart
+      const detail = [serverName, connected ? null : 'not connected'].filter(Boolean).join(' · ');
+      return { tab, label, detail };
     });
     this.runMenuFor = snippet.id;
   }

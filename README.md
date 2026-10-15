@@ -151,6 +151,8 @@ Warpgate is a great SSH gateway: one entry point, per-user roles, session record
 2. Search for **warpgate**
 3. Click **Install** and restart Tabby
 
+Tested with Tabby 1.0.238 and Warpgate 0.29.2.
+
 <details>
 <summary><b>Manual installation</b></summary>
 

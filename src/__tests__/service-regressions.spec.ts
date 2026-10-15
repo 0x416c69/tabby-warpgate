@@ -226,10 +226,25 @@ describe('WarpgateService regressions', () => {
       }
     });
 
+    it('should not log in again when the session is valid but a permission is missing', async () => {
+      addServer();
+      await service.connect(SERVER_ID);
+      client.login.mockClear();
+      // Warpgate answers 401 to admin API calls of users without admin permissions
+      client.createTicket.mockResolvedValue({ success: false, error: { status: 401, message: 'Unauthorized' } });
+
+      await expect(service.getOrCreateTicket(SERVER_ID, 'web')).resolves.toBeNull();
+
+      expect(client.login).not.toHaveBeenCalled();
+      expect(client.createTicket).toHaveBeenCalledTimes(1);
+      expect(service.areTicketsUnavailable(SERVER_ID)).toBe(true);
+    });
+
     it('should log in again and retry when ticket creation returns 401', async () => {
       addServer();
       await service.connect(SERVER_ID);
       client.login.mockClear();
+      client.isSessionValid.mockResolvedValueOnce(false);
       client.createTicket
         .mockResolvedValueOnce({ success: false, error: { status: 401, message: 'Unauthorized' } })
         .mockResolvedValueOnce({ success: true, data: { ticket: { id: 't1', uses_left: 1 }, secret: 's1' } });
@@ -288,6 +303,26 @@ describe('WarpgateService regressions', () => {
       expect(request.number_of_uses).toBe(1);
       expect(Date.parse(request.expiry)).toBeGreaterThan(Date.now());
       expect(request.description).toContain('Tabby Warpgate auto-generated');
+    });
+
+    it('should create a separate ticket for each simultaneous connection to a target', async () => {
+      addServer();
+      await service.connect(SERVER_ID);
+      client.createTicket
+        .mockResolvedValueOnce({ success: true, data: { ticket: { id: 't1', uses_left: 1 }, secret: 's1' } })
+        .mockResolvedValueOnce({ success: true, data: { ticket: { id: 't2', uses_left: 1 }, secret: 's2' } });
+
+      // e.g. both panes of a restored split tab connecting to the same host
+      const [first, second] = await Promise.all([
+        service.getOrCreateTicket(SERVER_ID, 'web'),
+        service.getOrCreateTicket(SERVER_ID, 'web'),
+      ]);
+
+      expect(client.createTicket).toHaveBeenCalledTimes(2);
+      expect([first?.username, second?.username].sort()).toEqual(['ticket-s1', 'ticket-s2']);
+      expect(service.claimUnusedTicket('ticket-s1')).toBe(true);
+      expect(service.claimUnusedTicket('ticket-s2')).toBe(true);
+      expect(service.claimUnusedTicket('ticket-s1')).toBe(false);
     });
 
     it('should never put tickets in the reusable connection details', async () => {
@@ -354,6 +389,19 @@ describe('WarpgateService regressions', () => {
       expect(notifications.notice).not.toHaveBeenCalled();
     });
 
+    it('should explain ticket-only failures caused by missing permissions', async () => {
+      config.store.warpgate.authMethod = 'ticket';
+      addServer();
+      await service.connect(SERVER_ID);
+      client.createTicket.mockResolvedValue({ success: false, error: { status: 403, message: 'Forbidden' } });
+
+      await expect(service.getConnectionCredentials(SERVER_ID, 'web')).resolves.toBeNull();
+
+      const message = notifications.error.mock.calls.map(call => call[0]).find(text => text.startsWith('Cannot connect to web'));
+      expect(message).toContain('"admin" is not allowed to create tickets');
+      expect(message).toContain('"Automatic"');
+    });
+
     it('should clean up used and expired plugin tickets only', async () => {
       addServer();
       await service.connect(SERVER_ID);
@@ -372,6 +420,18 @@ describe('WarpgateService regressions', () => {
 
       expect(deleted).toBe(2);
       expect(client.deleteTicket.mock.calls.map(call => call[0])).toEqual(['used', 'expired']);
+    });
+
+    it('should stop trying to clean up tickets when the user may not list them', async () => {
+      addServer();
+      await service.connect(SERVER_ID);
+      client.listTickets.mockResolvedValue({ success: false, error: { status: 401, message: 'Unauthorized' } });
+
+      await service.cleanupUsedTickets(SERVER_ID);
+      await service.cleanupUsedTickets(SERVER_ID);
+
+      expect(client.listTickets).toHaveBeenCalledTimes(1);
+      expect(client.login).toHaveBeenCalledTimes(1);
     });
   });
 

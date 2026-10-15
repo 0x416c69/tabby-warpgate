@@ -37,6 +37,7 @@ const createMockWarpgateService = () => {
       hasOtpSecret: false,
     }),
     getOrCreateTicket: jest.fn().mockResolvedValue(null),
+    describeTicketOnlyFailure: jest.fn(() => 'No ticket could be created and Authentication is set to "Tickets only".'),
     getFullAuthCredentials: jest.fn().mockResolvedValue({
       host: 'warpgate.example.com',
       port: 2222,
@@ -261,7 +262,7 @@ describe('WarpgateProfileProvider', () => {
       mockService.config.authMethod = 'ticket';
 
       await expect(provider.createOneClickProfile(mockServer, mockTarget))
-        .rejects.toThrow('Ticket-only mode');
+        .rejects.toThrow('Authentication is set to "Tickets only"');
     });
 
     it('should not ask for a ticket in password mode', async () => {

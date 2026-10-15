@@ -843,7 +843,6 @@ export class WarpgateHostsComponent implements OnInit, OnDestroy {
   isRefreshing = false;
   refreshSuccess = false;
   hasServers = false;
-  snippetCount = 0;
   disconnectedServers: WarpgateServerConfig[] = [];
   config: WarpgatePluginConfig;
   editingHost: HostItem | null = null;
@@ -925,6 +924,11 @@ export class WarpgateHostsComponent implements OnInit, OnDestroy {
     this.loadHosts();
   }
 
+  /** Number of saved snippets (snippets are edited in a child view, so read it live) */
+  get snippetCount(): number {
+    return (this.warpgateService.getConfig().snippets ?? []).length;
+  }
+
   // ==================== Data ====================
 
   /**
@@ -934,7 +938,6 @@ export class WarpgateHostsComponent implements OnInit, OnDestroy {
     this.config = this.warpgateService.getConfig();
     const servers = this.warpgateService.getServers();
     this.hasServers = servers.length > 0;
-    this.snippetCount = (this.config.snippets ?? []).length;
 
     const pinned = new Set(this.config.pinnedHosts ?? []);
     const lastConnected = this.history.getLastConnectedMap();

@@ -5,7 +5,7 @@
  */
 
 import { Injectable, Inject } from '@angular/core';
-import { AppService } from 'tabby-core';
+import { AppService, TabsService } from 'tabby-core';
 import { WarpgateService } from '../services/warpgate.service';
 import { WarpgateHostSettingsService } from '../services/host-settings.service';
 import { WarpgateHistoryService } from '../services/history.service';
@@ -22,6 +22,9 @@ const PASSWORD_RETRY_GUARD_MS = 5000;
 /** Polling interval when the prompt property cannot be intercepted */
 const PROMPT_POLL_INTERVAL_MS = 250;
 
+/** Tab services whose create() is already hooked */
+const hookedTabServices = new WeakSet<object>();
+
 /** State kept for every Warpgate SSH tab */
 interface WarpgateTabState {
   serverId: string;
@@ -35,6 +38,8 @@ interface WarpgateTabState {
   lastOtpCode?: string;
   /** When the stored password was auto-filled during the current attempt */
   lastPasswordAt?: number;
+  /** Whether the tab's profile was replaced with a plain copy owned by the tab */
+  ownsProfile?: boolean;
 }
 
 /** Warpgate server and target of a tab */
@@ -65,7 +70,8 @@ export class WarpgateSshHandler {
     @Inject(AppService) private app: AppService,
     @Inject(WarpgateService) private warpgateService: WarpgateService,
     @Inject(WarpgateHostSettingsService) private hostSettings: WarpgateHostSettingsService,
-    @Inject(WarpgateHistoryService) private history: WarpgateHistoryService
+    @Inject(WarpgateHistoryService) private history: WarpgateHistoryService,
+    @Inject(TabsService) private tabsService: TabsService
   ) {
     this.init();
   }
@@ -84,6 +90,8 @@ export class WarpgateSshHandler {
   }
 
   private init(): void {
+    this.hookTabCreation();
+
     // Watch for new tabs
     this.app.tabOpened$.subscribe(tab => {
       this.attachToTab(tab);
@@ -93,6 +101,29 @@ export class WarpgateSshHandler {
     for (const tab of this.app.tabs ?? []) {
       this.attachToTab(tab);
     }
+  }
+
+  /**
+   * Attach to every tab right after Tabby creates it, before it connects
+   * Panes of restored split tabs are created this way without any event
+   */
+  private hookTabCreation(): void {
+    const tabsService = this.tabsService as any;
+    if (typeof tabsService?.create !== 'function' || hookedTabServices.has(tabsService)) {
+      return;
+    }
+    hookedTabServices.add(tabsService);
+
+    const create = tabsService.create.bind(tabsService);
+    tabsService.create = (params: any) => {
+      const tab = create(params);
+      try {
+        this.attachToTab(tab);
+      } catch (error) {
+        log.error('Failed to attach to a new tab:', error);
+      }
+      return tab;
+    };
   }
 
   /**
@@ -231,10 +262,18 @@ export class WarpgateSshHandler {
    * Update the tab's profile before a connection attempt
    */
   async prepareConnection(tab: any, state: WarpgateTabState): Promise<void> {
-    const options = tab.profile?.options;
-    if (!options) {
+    if (!tab.profile?.options) {
       return;
     }
+
+    // Split and duplicated tabs get a config proxy layered on the original tab's proxy,
+    // which throws when an option is set back to its default value.
+    // Work on a plain copy of the profile (defaults included) instead.
+    if (!state.ownsProfile) {
+      tab.profile = JSON.parse(JSON.stringify(tab.profile));
+      state.ownsProfile = true;
+    }
+    const options = tab.profile.options;
 
     state.attempts++;
     state.lastOtpCode = undefined;

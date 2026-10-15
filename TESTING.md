@@ -214,9 +214,55 @@ These tests would have caught all the bugs we encountered:
 3. **✅ OTP prompt not working** - Would be caught by integration tests (mocked NgbModal)
 4. **✅ Config array manipulation issues** - Caught by config-proxy tests
 
+## End-to-End Testing with Warpgate and Tabby
+
+Unit tests cannot catch everything that depends on Tabby's runtime (Angular zones, config proxies,
+tab recovery), so test releases against a real Warpgate and a real Tabby. The last full run used
+Warpgate 0.29.2 and Tabby 1.0.238 on Linux.
+
+### 1. Start Warpgate
+
+```bash
+mkdir -p warpgate-data && chmod 777 warpgate-data
+docker run --rm -v "$PWD/warpgate-data:/data" ghcr.io/warp-tech/warpgate \
+  unattended-setup --data-path /data --http-port 8888 --ssh-port 2222 \
+  --host-key-verification auto-accept --admin-password 'AdminPass123!'
+# On hosts without IPv6, change the `listen: '[::]:…'` entries in warpgate-data/warpgate.yaml to 0.0.0.0
+docker run -d --name warpgate --network host -v "$PWD/warpgate-data:/data" ghcr.io/warp-tech/warpgate run
+```
+
+In the web UI (`https://localhost:8888`), add one or more SSH targets (any SSH server works,
+e.g. a local OpenSSH with password auth), assign them to roles, and create a second, non-admin
+user with a password and a TOTP credential.
+
+### 2. Run Tabby with the plugin
+
+```bash
+npm run build
+TABBY_PLUGINS=$(dirname $(pwd)) tabby --debug
+```
+
+### 3. Checklist
+
+| Area | What to check |
+|------|---------------|
+| Servers | Add a server with the URL on port 8888, test connection, OTP prompt for the 2FA user, enable/disable |
+| Tickets | One-click connect as admin; SSH goes to port 2222; reconnect, split and duplicate get new tickets |
+| Restore | Restart Tabby with split Warpgate tabs open: every pane connects with its own ticket |
+| Fallback | Non-admin user: password login with the OTP prompt answered automatically, no ticket errors |
+| Modes | "Password only" and "Tickets only" (clear error for users who cannot create tickets) |
+| OTP | Set up OTP and Disable OTP from settings; restart Tabby to check login with the stored secret |
+| Hosts | Alias, color, tags, notes, pinning, search, quick connect (Ctrl+Shift+K), Ctrl+Shift+H |
+| Automation | Startup snippet, snippet in one/all sessions, Ctrl+Shift+J, connect several hosts and run |
+| Forwarding | Local port forward reaches its destination through Warpgate |
+| Themes | Hosts panel in dark and light color schemes |
+
+Warpgate logs every ticket, login and channel (`docker logs warpgate`), which makes it easy to
+confirm what the plugin did.
+
 ## Future Improvements
 
-1. Add E2E tests with a real Warpgate test server and Tabby
+1. Automate the end-to-end checklist above
 2. Add performance tests for large numbers of servers and hosts
 3. Add tests for network interruption scenarios
 

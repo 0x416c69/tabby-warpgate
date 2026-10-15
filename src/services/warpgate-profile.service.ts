@@ -177,7 +177,7 @@ export class WarpgateProfileProvider extends ProfileProvider<WarpgateSSHProfile>
       }
 
       if (authMethod === 'ticket') {
-        throw new Error(`Cannot create ticket for ${target.name}. Ticket-only mode is enabled but ticket creation failed.`);
+        throw new Error(this.warpgateService.describeTicketOnlyFailure(server.id));
       }
     }
 
