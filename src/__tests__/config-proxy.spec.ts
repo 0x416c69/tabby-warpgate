@@ -64,7 +64,7 @@ describe('Config Proxy Compatibility Tests', () => {
     service = new WarpgateService(
       mockConfigService,
       mockNotificationsService,
-      mockPlatformService,
+      mockPlatformService as any,
       mockInjector
     );
   });

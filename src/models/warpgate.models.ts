@@ -15,7 +15,7 @@ export type BootstrapThemeColor =
   | 'dark';
 
 /** Target kinds supported by Warpgate */
-export type TargetKind = 'Ssh' | 'Http' | 'MySql' | 'WebAdmin';
+export type TargetKind = 'Ssh' | 'Http' | 'MySql' | 'Postgres' | 'Kubernetes' | 'WebAdmin';
 
 /** Group information for organizing targets */
 export interface WarpgateGroup {
@@ -34,20 +34,22 @@ export interface WarpgateTarget {
 
 /** Server info from Warpgate /api/info endpoint */
 export interface WarpgateServerInfo {
-  username: string;
-  version: string;
-  external_host?: string;
-  ports: {
-    ssh: number;
-    http: number;
-    mysql: number;
-    postgres: number;
+  /** Logged in username, null when the session is not authenticated */
+  username: string | null;
+  version?: string | null;
+  external_host?: string | null;
+  /** External ports; only reported for authenticated sessions */
+  ports?: {
+    ssh?: number | null;
+    http?: number | null;
+    mysql?: number | null;
+    postgres?: number | null;
   };
-  selected_target: string | null;
-  authorized_via_ticket: boolean;
-  authorized_via_sso_with_single_logout: boolean;
-  own_credential_management_allowed: boolean;
-  setup_state: {
+  selected_target?: string | null;
+  authorized_via_ticket?: boolean;
+  authorized_via_sso_with_single_logout?: boolean;
+  own_credential_management_allowed?: boolean;
+  setup_state?: {
     has_users: boolean;
     has_targets: boolean;
   };
@@ -62,6 +64,8 @@ export interface WarpgateAuthState {
   auth: {
     state: 'NotStarted' | 'Progress' | 'Need' | 'Accepted' | 'Rejected';
     methods_remaining?: string[];
+    /** Human readable reason when the state is Rejected */
+    reason?: string;
   };
 }
 
@@ -80,8 +84,18 @@ export interface WarpgateLoginResponse {
 /** User info response - same as ServerInfo */
 export type WarpgateUserInfo = WarpgateServerInfo;
 
+/** SSH session options that can be set per server and overridden per host */
+export interface WarpgateSshSessionOptions {
+  /** Forward the local SSH agent to the host */
+  agentForward?: boolean;
+  /** Forward X11 connections */
+  x11?: boolean;
+  /** Keepalive interval in milliseconds (0 disables keepalives) */
+  keepaliveInterval?: number;
+}
+
 /** Warpgate server configuration stored by the plugin */
-export interface WarpgateServerConfig {
+export interface WarpgateServerConfig extends WarpgateSshSessionOptions {
   id: string;
   name: string;
   url: string;
@@ -92,6 +106,56 @@ export interface WarpgateServerConfig {
   trustSelfSigned?: boolean;
   /** Base32-encoded TOTP secret for automatic OTP generation (fallback auth) */
   otpSecret?: string;
+}
+
+/** Port forwarding rule types (same as Tabby's) */
+export type WarpgatePortForwardType = 'Local' | 'Remote' | 'Dynamic';
+
+/** Port forwarding rule for a host */
+export interface WarpgatePortForward {
+  type: WarpgatePortForwardType;
+  /** Address to listen on */
+  host: string;
+  /** Port to listen on */
+  port: number;
+  /** Destination address (not used for dynamic forwards) */
+  targetAddress: string;
+  /** Destination port (not used for dynamic forwards) */
+  targetPort: number;
+  description?: string;
+}
+
+/** Per-host customization, keyed by host key ("serverId:targetName") */
+export interface WarpgateHostSettings extends WarpgateSshSessionOptions {
+  /** Display name used instead of the target name */
+  alias?: string;
+  tags?: string[];
+  notes?: string;
+  /** Custom accent color (CSS color) */
+  color?: string;
+  /** Snippet sent to the shell after connecting */
+  startupSnippetId?: string;
+  forwardedPorts?: WarpgatePortForward[];
+}
+
+/** Saved command snippet */
+export interface WarpgateSnippet {
+  id: string;
+  name: string;
+  /** Commands to send; multiple lines are sent as typed */
+  script: string;
+  description?: string;
+  tags?: string[];
+}
+
+/** Connection history entry (one per host, most recent first) */
+export interface WarpgateHistoryEntry {
+  serverId: string;
+  targetName: string;
+  /** ISO timestamp of the last connection */
+  lastConnectedAt: string;
+  /** Number of connections */
+  count: number;
 }
 
 /** Connection status for a Warpgate server */
@@ -123,7 +187,7 @@ export interface WarpgatePluginConfig {
   autoRefreshInterval: number;
   showOfflineServers: boolean;
   groupByServer: boolean;
-  sortBy: 'name' | 'server' | 'kind' | 'group';
+  sortBy: 'name' | 'server' | 'kind' | 'group' | 'recent';
   /** Preferred authentication method: ticket (one-time tickets), password (keyboard-interactive), or auto (try ticket first) */
   authMethod: WarpgateAuthMethod;
   /** Enable debug logging to console */
@@ -132,7 +196,16 @@ export interface WarpgatePluginConfig {
   pinnedHosts: string[];
   /** View mode for hosts panel */
   viewMode: HostsViewMode;
+  /** Per-host customization by host key ("serverId:targetName") */
+  hostSettings: Record<string, WarpgateHostSettings>;
+  /** Saved snippets */
+  snippets: WarpgateSnippet[];
+  /** Connection history, most recent first */
+  history: WarpgateHistoryEntry[];
 }
+
+/** Maximum number of hosts kept in the connection history */
+export const MAX_HISTORY_ENTRIES = 50;
 
 /** Default plugin configuration */
 export const DEFAULT_WARPGATE_CONFIG: WarpgatePluginConfig = {
@@ -145,7 +218,17 @@ export const DEFAULT_WARPGATE_CONFIG: WarpgatePluginConfig = {
   debugMode: false,
   pinnedHosts: [],
   viewMode: 'grid',
+  hostSettings: {},
+  snippets: [],
+  history: [],
 };
+
+/**
+ * Build the key that identifies a host across the plugin ("serverId:targetName")
+ */
+export function getHostKey(serverId: string, targetName: string): string {
+  return `${serverId}:${targetName}`;
+}
 
 /** API error response */
 export interface WarpgateApiError {
@@ -188,8 +271,8 @@ export interface WarpgateTicket {
   created: string;
   /** Optional expiry timestamp */
   expiry?: string | null;
-  /** Remaining uses (-1 for unlimited, 0 means used up) */
-  uses_left?: number;
+  /** Remaining uses (null for unlimited, 0 means used up) */
+  uses_left?: number | null;
   /** Description of the ticket */
   description?: string;
 }
@@ -256,30 +339,24 @@ export interface WarpgateUser {
   };
 }
 
-/** User's own credential state from profile API */
+/** User's own credential state from profile API (GET /profile/credentials) */
 export interface WarpgateProfileCredentials {
-  /** Whether user has a password set */
-  password: boolean;
-  /** List of OTP credential IDs */
-  otp: string[];
-  /** List of public key IDs */
-  publicKeys: string[];
-  /** Whether SSO is configured */
-  sso: boolean;
+  /** Password state ("Unset", "Set" or "MultipleSet") */
+  password?: string;
+  /** Registered OTP credentials */
+  otp: WarpgateOtpCredential[];
+  /** Registered public keys */
+  public_keys?: Array<{ id: string }>;
 }
 
 /** Response when enabling OTP via profile API */
 export interface WarpgateOtpEnableResponse {
   /** The credential ID */
   id: string;
-  /** The TOTP secret (only returned once on creation) */
-  secret: string;
-  /** Provisioning URI for QR code (otpauth://...) */
-  provisioning_uri?: string;
 }
 
-/** Request to enable OTP - includes the secret being registered */
+/** Request to enable OTP via profile API */
 export interface WarpgateOtpEnableRequest {
-  /** Base32-encoded TOTP secret */
-  secret: string;
+  /** Raw (Base32-decoded) TOTP secret bytes */
+  secret_key: number[];
 }

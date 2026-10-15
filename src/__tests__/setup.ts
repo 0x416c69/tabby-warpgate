@@ -12,6 +12,13 @@ if (typeof window === 'undefined') {
   (global as any).window = undefined;
 }
 
+// DOM event classes referenced by decorator metadata of components
+for (const name of ['KeyboardEvent', 'MouseEvent']) {
+  if (typeof (global as any)[name] === 'undefined') {
+    (global as any)[name] = class {};
+  }
+}
+
 // Reset mocks before each test
 beforeEach(() => {
   jest.clearAllMocks();

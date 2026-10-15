@@ -3,13 +3,15 @@
  * Provides SSH profiles for Warpgate targets that integrate with Tabby's profile system
  */
 
-import { Injectable, Inject } from '@angular/core';
-import { ProfileProvider, Profile, PartialProfile, NewTabParameters } from 'tabby-core';
+import { Injectable, Inject, Injector } from '@angular/core';
+import { ProfileProvider, ProfilesService, PartialProfile, NewTabParameters } from 'tabby-core';
 import { SSHProfile } from 'tabby-ssh';
 
 import { WarpgateService } from './warpgate.service';
+import { WarpgateHostSettingsService } from './host-settings.service';
 import { WarpgateTarget, WarpgateServerConfig } from '../models/warpgate.models';
 import { BOOTSTRAP_COLORS, THEME_ICONS } from '../models/theme.constants';
+import { WarpgateProfileKind, buildWarpgateProfileId, parseWarpgateProfileId } from '../utils/profile-id';
 import { createLogger } from '../utils/debug-logger';
 
 const log = createLogger('ProfileService');
@@ -23,17 +25,25 @@ export interface WarpgateSSHProfile extends SSHProfile {
     targetDescription?: string;
     groupName?: string;
     /**
-     * Password for keyboard-interactive auth.
-     * Stored here instead of options.password to avoid interfering with auto auth mode.
+     * DEPRECATED: Not populated anymore. The SSH handler reads the password
+     * from the server configuration when it needs it.
      */
     password?: string;
     /**
-     * DEPRECATED: Do not use. OTP codes are now generated fresh on-demand by the SSH handler.
+     * DEPRECATED: Do not use. OTP codes are generated fresh on-demand by the SSH handler.
      * TOTP codes are time-based and can only be used once, so they should never be cached.
-     * This field is kept for backwards compatibility but should always be undefined.
      */
     otpCode?: string;
   };
+}
+
+/** Connection fields of an SSH profile */
+interface ProfileConnection {
+  host: string;
+  port: number;
+  user: string;
+  auth: 'password' | null;
+  password: string | null;
 }
 
 /**
@@ -47,48 +57,40 @@ export class WarpgateProfileProvider extends ProfileProvider<WarpgateSSHProfile>
   supportsQuickConnect = false;
   settingsComponent = null;
 
-  constructor(@Inject(WarpgateService) private warpgateService: WarpgateService) {
+  constructor(
+    @Inject(WarpgateService) private warpgateService: WarpgateService,
+    @Inject(WarpgateHostSettingsService) private hostSettings: WarpgateHostSettingsService,
+    @Inject(Injector) private injector: Injector
+  ) {
     super();
   }
 
   /**
    * Get all available profiles from Warpgate servers
+   * These profiles use password authentication details; the SSH handler swaps in
+   * a fresh one-time ticket right before each connection when tickets are enabled
    */
   async getBuiltinProfiles(): Promise<WarpgateSSHProfile[]> {
     const profiles: WarpgateSSHProfile[] = [];
 
-    // Ensure all servers are connected and server info is loaded
-    // This populates the serverInfo map which is needed for ticket auth
+    // Wait for servers that are still connecting (or were never connected),
+    // but do not retry servers that already failed every time Tabby lists profiles
     const servers = this.warpgateService.getServers().filter(s => s.enabled);
-    await Promise.all(
-      servers.map(async server => {
-        if (!this.warpgateService.isConnected(server.id)) {
-          try {
-            await this.warpgateService.connect(server.id);
-          } catch {
-            // Ignore connection errors - profiles just won't be available for this server
-          }
-        }
-      })
-    );
+    await Promise.all(servers.map(server => this.warpgateService.ensureConnected(server.id)));
 
-    // Get targets AFTER ensuring connections are established
-    const allTargets = this.warpgateService.getAllTargets();
-
-    for (const { server, target } of allTargets) {
-      // Use createProfileFromTarget for builtin profiles list
-      // This does NOT create tickets - tickets are only created when user clicks connect
-      // from Warpgate Hosts view (which uses createOneClickProfile)
-      const profile = this.createProfileFromTarget(server, target);
-      profiles.push(profile);
+    for (const { server, target } of this.warpgateService.getAllTargets()) {
+      try {
+        profiles.push(this.createProfileFromTarget(server, target));
+      } catch (error) {
+        log.debug(`Skipping profile for ${target.name}:`, error);
+      }
     }
 
     return profiles;
   }
 
   /**
-   * Create a profile from a Warpgate target
-   * Uses ticket-based authentication for one-click access when available
+   * Create a profile from a Warpgate target using password authentication details
    */
   createProfileFromTarget(server: WarpgateServerConfig, target: WarpgateTarget): WarpgateSSHProfile {
     const connectionDetails = this.warpgateService.getSshConnectionDetails(server.id, target.name);
@@ -97,39 +99,13 @@ export class WarpgateProfileProvider extends ProfileProvider<WarpgateSSHProfile>
       throw new Error(`Cannot get connection details for ${target.name}`);
     }
 
-    const profileId = `warpgate:${server.id}:${target.name}`;
-    const groupName = target.group?.name || server.name;
-
-    // When using ticket-based auth, no password is needed (it's embedded in the username)
-    const profile: WarpgateSSHProfile = {
-      id: profileId,
-      type: 'ssh',
-      name: target.name,
-      group: `Warpgate/${groupName}`,
-      icon: this.getIconForTarget(target),
-      color: this.getColorForTarget(target),
-      isBuiltin: true,
-      isTemplate: false,
-      options: {
-        host: connectionDetails.host,
-        port: connectionDetails.port,
-        user: connectionDetails.username,
-        // For ticket auth: use auto mode (null) since ticket is embedded in username
-        // For traditional auth: use password authentication
-        auth: connectionDetails.useTicket ? 'password' : null,
-        password: connectionDetails.useTicket ? 'x' : connectionDetails.password,
-        algorithms: {},
-      },
-      warpgate: {
-        serverId: server.id,
-        serverName: server.name,
-        targetName: target.name,
-        targetDescription: target.description,
-        groupName: target.group?.name,
-      },
-    };
-
-    return profile;
+    return this.buildProfile(server, target, undefined, {
+      host: connectionDetails.host,
+      port: connectionDetails.port,
+      user: connectionDetails.username,
+      auth: null,
+      password: connectionDetails.password ?? null,
+    });
   }
 
   /**
@@ -140,113 +116,38 @@ export class WarpgateProfileProvider extends ProfileProvider<WarpgateSSHProfile>
     server: WarpgateServerConfig,
     target: WarpgateTarget
   ): Promise<WarpgateSSHProfile> {
-    // Get or create a fresh ticket for this target
     const ticketDetails = await this.warpgateService.getOrCreateTicket(server.id, target.name);
 
     if (!ticketDetails) {
       throw new Error(`Cannot get ticket for ${target.name}`);
     }
 
-    const profileId = `warpgate:${server.id}:${target.name}:ticket`;
-    const groupName = target.group?.name || server.name;
-
-    // Profile with ticket-based auth
-    // Match EXACTLY the structure that works when manually created in Tabby UI
-    const profile: WarpgateSSHProfile = {
-      id: profileId,
-      type: 'ssh',
-      name: target.name,
-      group: `Warpgate/${groupName}`,
-      icon: this.getIconForTarget(target),
-      color: this.getColorForTarget(target),
-      isBuiltin: true,
-      isTemplate: false,
-      options: {
-        host: ticketDetails.host,
-        port: ticketDetails.port,
-        user: ticketDetails.username,
-        auth: 'password',
-        password: 'x',
-        algorithms: {},
-      },
-      warpgate: {
-        serverId: server.id,
-        serverName: server.name,
-        targetName: target.name,
-        targetDescription: target.description,
-        groupName: target.group?.name,
-      },
-    };
-
-    return profile;
+    return this.buildTicketProfile(server, target, ticketDetails);
   }
 
   /**
    * Create a profile with automatic password + OTP authentication
-   * This is the fallback method when ticket creation is not available
-   * Uses keyboard-interactive auth with password stored for auto-fill
-   * OTP code is stored in warpgate metadata for the KI handler to use
+   * This is the fallback method when ticket creation is not available.
+   * The password is used by Tabby directly, OTP prompts are answered by the SSH handler.
    */
   async createProfileWithAutoAuth(
     server: WarpgateServerConfig,
     target: WarpgateTarget
   ): Promise<WarpgateSSHProfile> {
-    // Get full credentials including OTP code
     const authDetails = await this.warpgateService.getFullAuthCredentials(server.id, target.name);
 
     if (!authDetails) {
       throw new Error(`Cannot get auth credentials for ${target.name}`);
     }
 
-    // If ticket auth is available, use that instead
-    if (authDetails.useTicket) {
-      return this.createProfileWithTicket(server, target);
-    }
-
-    const profileId = `warpgate:${server.id}:${target.name}:autoauth`;
-    const groupName = target.group?.name || server.name;
-
-    log.debug(` Creating auto-auth profile for ${target.name} with OTP: ${authDetails.otpCode ? 'yes' : 'no'}`);
-
-    // Use minimal profile structure matching the working "testy" profile
-    // No password in options - it will be prompted via keyboard-interactive
-    const profile: WarpgateSSHProfile = {
-      id: profileId,
-      type: 'ssh',
-      name: target.name,
-      group: `Warpgate/${groupName}`,
-      icon: this.getIconForTarget(target),
-      color: this.getColorForTarget(target),
-      isBuiltin: true,
-      isTemplate: false,
-      options: {
-        host: authDetails.host,
-        port: authDetails.port,
-        user: authDetails.username,
-        // Use auto (null) auth mode to let SSH negotiate the best method
-        // Warpgate will prompt for OTP first, then password via keyboard-interactive
-        // CRITICAL: Must be `null` not `undefined` to match Tabby's serialization behavior
-        auth: null,
-        // Include password so Tabby's built-in keyboard-interactive handler can use it
-        // for the password prompt (after OTP prompt)
-        password: authDetails.password,
-        algorithms: {},
-        input: {},
-      },
-      warpgate: {
-        serverId: server.id,
-        serverName: server.name,
-        targetName: target.name,
-        targetDescription: target.description,
-        groupName: target.group?.name,
-        // Store password here so the SSH handler can access it
-        password: authDetails.password,
-        // NOTE: Do NOT store otpCode here! OTP codes are time-based and can only be used once.
-        // The SSH handler will generate fresh OTP codes on demand for each auth attempt.
-      },
-    };
-
-    return profile;
+    // auto (null) auth mode lets SSH negotiate password and keyboard-interactive auth
+    return this.buildProfile(server, target, 'autoauth', {
+      host: authDetails.host,
+      port: authDetails.port,
+      user: authDetails.username,
+      auth: null,
+      password: authDetails.password ?? null,
+    });
   }
 
   /**
@@ -260,77 +161,96 @@ export class WarpgateProfileProvider extends ProfileProvider<WarpgateSSHProfile>
     server: WarpgateServerConfig,
     target: WarpgateTarget
   ): Promise<WarpgateSSHProfile> {
-    const config = this.warpgateService.getConfig();
-    const authMethod = config.authMethod || 'auto';
-    log.debug(` createOneClickProfile for ${target.name}, authMethod: ${authMethod}`);
+    const authMethod = this.warpgateService.getConfig().authMethod || 'auto';
+    log.debug(`createOneClickProfile for ${target.name}, authMethod: ${authMethod}`);
 
-    // If password-only is configured, skip ticket auth entirely
-    if (authMethod === 'password') {
-      log.debug(' Using password auth (configured)');
-      return this.createProfileWithAutoAuth(server, target);
-    }
-
-    // Try to get a ticket for one-click access (for 'auto' or 'ticket' modes)
-    try {
-      const ticketDetails = await this.warpgateService.getOrCreateTicket(server.id, target.name);
-      log.debug(' Ticket details:', ticketDetails);
-      if (ticketDetails && ticketDetails.username.startsWith('ticket-')) {
-        log.debug(` Using ticket auth profile with username: ${ticketDetails.username}`);
-        // Create profile directly with the ticket details we already have
-        // Don't call createProfileWithTicket as it would create another ticket
-        return this.buildTicketProfile(server, target, ticketDetails);
-      } else {
-        log.debug(` Ticket username doesn't start with 'ticket-': ${ticketDetails?.username}`);
+    if (authMethod !== 'password') {
+      let ticketDetails = null;
+      try {
+        ticketDetails = await this.warpgateService.getOrCreateTicket(server.id, target.name);
+      } catch (error) {
+        log.debug('Ticket creation threw error:', error);
       }
-    } catch (error) {
-      // Ticket creation failed
-      log.debug(' Ticket creation threw error:', error);
 
-      // If ticket-only mode, throw error
+      if (ticketDetails) {
+        return this.buildTicketProfile(server, target, ticketDetails);
+      }
+
       if (authMethod === 'ticket') {
         throw new Error(`Cannot create ticket for ${target.name}. Ticket-only mode is enabled but ticket creation failed.`);
       }
     }
 
-    // Fall back to automatic password authentication (only for 'auto' mode)
-    log.debug(' Falling back to auto auth profile');
     return this.createProfileWithAutoAuth(server, target);
   }
 
   /**
-   * Build a profile from existing ticket details (doesn't create new ticket)
+   * Build a profile from existing ticket details (doesn't create a new ticket)
    */
   private buildTicketProfile(
     server: WarpgateServerConfig,
     target: WarpgateTarget,
     ticketDetails: { host: string; port: number; username: string }
   ): WarpgateSSHProfile {
-    const profileId = `warpgate:${server.id}:${target.name}:ticket`;
+    // Tickets are passed in the username; Warpgate accepts any password with it
+    return this.buildProfile(server, target, 'ticket', {
+      host: ticketDetails.host,
+      port: ticketDetails.port,
+      user: ticketDetails.username,
+      auth: 'password',
+      password: 'x',
+    });
+  }
+
+  /**
+   * Build an SSH profile for a target with the host's customization applied
+   */
+  private buildProfile(
+    server: WarpgateServerConfig,
+    target: WarpgateTarget,
+    kind: WarpgateProfileKind | undefined,
+    connection: ProfileConnection
+  ): WarpgateSSHProfile {
+    const settings = this.hostSettings.getSettings(server.id, target.name);
     const groupName = target.group?.name || server.name;
 
-    // For Warpgate ticket auth:
-    // Match EXACTLY the structure that works when manually created in Tabby UI
-    // The working profile has: auth: password, algorithms: {}, input: {}
-    // DO NOT add extra fields - they cause authentication issues
-    log.debug(` Building ticket profile with username: ${ticketDetails.username}`);
+    const options: Record<string, any> = {
+      host: connection.host,
+      port: connection.port,
+      user: connection.user,
+      auth: connection.auth,
+      password: connection.password,
+      algorithms: {},
+    };
+
+    // Only set options that differ from Tabby's defaults
+    const sshOptions = this.hostSettings.getEffectiveSshOptions(server, target.name);
+    if (sshOptions.agentForward) {
+      options.agentForward = true;
+    }
+    if (sshOptions.x11) {
+      options.x11 = true;
+    }
+    if (sshOptions.keepaliveInterval !== undefined) {
+      options.keepaliveInterval = sshOptions.keepaliveInterval;
+    }
+    if (sshOptions.forwardedPorts.length > 0) {
+      options.forwardedPorts = sshOptions.forwardedPorts;
+    }
+    if (sshOptions.scripts.length > 0) {
+      options.scripts = sshOptions.scripts;
+    }
 
     return {
-      id: profileId,
+      id: buildWarpgateProfileId(server.id, target.name, kind),
       type: 'ssh',
-      name: target.name,
+      name: settings.alias || target.name,
       group: `Warpgate/${groupName}`,
       icon: this.getIconForTarget(target),
-      color: this.getColorForTarget(target),
+      color: settings.color || this.getColorForTarget(target),
       isBuiltin: true,
       isTemplate: false,
-      options: {
-        host: ticketDetails.host,
-        port: ticketDetails.port,
-        user: ticketDetails.username,
-        auth: 'password',
-        password: 'x',
-        algorithms: {},
-      },
+      options: options as WarpgateSSHProfile['options'],
       warpgate: {
         serverId: server.id,
         serverName: server.name,
@@ -359,11 +279,40 @@ export class WarpgateProfileProvider extends ProfileProvider<WarpgateSSHProfile>
   }
 
   /**
+   * Resolve server and target of a profile
+   * Tabby's profile proxies hide the warpgate metadata, so fall back to the profile ID
+   */
+  private resolveProfile(profile: PartialProfile<WarpgateSSHProfile>): {
+    serverName?: string;
+    targetName: string;
+    description?: string;
+  } | null {
+    if (profile.warpgate) {
+      return {
+        serverName: profile.warpgate.serverName,
+        targetName: profile.warpgate.targetName,
+        description: profile.warpgate.targetDescription,
+      };
+    }
+
+    const parsed = parseWarpgateProfileId(profile.id);
+    if (!parsed) {
+      return null;
+    }
+    return {
+      serverName: this.warpgateService.getServer(parsed.serverId)?.name,
+      targetName: parsed.targetName,
+      description: this.warpgateService.getTarget(parsed.serverId, parsed.targetName)?.description,
+    };
+  }
+
+  /**
    * Get suggested name for a profile
    */
   getSuggestedName(profile: PartialProfile<WarpgateSSHProfile>): string | null {
-    if (profile.warpgate) {
-      return profile.warpgate.targetName;
+    const resolved = this.resolveProfile(profile);
+    if (resolved) {
+      return resolved.targetName;
     }
     return profile.name || null;
   }
@@ -372,10 +321,11 @@ export class WarpgateProfileProvider extends ProfileProvider<WarpgateSSHProfile>
    * Get description for a profile
    */
   getDescription(profile: PartialProfile<WarpgateSSHProfile>): string {
-    if (profile.warpgate) {
+    const resolved = this.resolveProfile(profile);
+    if (resolved) {
       const parts = [
-        `Warpgate: ${profile.warpgate.serverName}`,
-        profile.warpgate.targetDescription || '',
+        resolved.serverName ? `Warpgate: ${resolved.serverName}` : 'Warpgate',
+        resolved.description || '',
       ].filter(Boolean);
       return parts.join(' - ');
     }
@@ -384,14 +334,16 @@ export class WarpgateProfileProvider extends ProfileProvider<WarpgateSSHProfile>
 
   /**
    * Get tab parameters for opening a connection
+   * Warpgate profiles are SSH profiles, so Tabby's SSH provider opens them
    */
-  async getNewTabParameters(profile: Profile): Promise<NewTabParameters<any>> {
-    return {
-      type: 'ssh-tab',
-      inputs: {
-        profile,
-      },
-    };
+  async getNewTabParameters(profile: WarpgateSSHProfile): Promise<NewTabParameters<any>> {
+    const profilesService = this.injector.get(ProfilesService);
+    const sshProvider = profilesService.getProviders().find(provider => provider.id === 'ssh');
+    if (!sshProvider) {
+      throw new Error('Tabby SSH support is not available');
+    }
+    const sshProfile = profilesService.getConfigProxyForProfile({ ...profile, type: 'ssh' });
+    return sshProvider.getNewTabParameters(sshProfile);
   }
 
   /**

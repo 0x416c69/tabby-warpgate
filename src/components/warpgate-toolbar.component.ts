@@ -10,7 +10,7 @@ import {
   AppService,
 } from 'tabby-core';
 
-import { WarpgateHostsTabComponent } from './warpgate-hosts-tab.component';
+import { openWarpgateHostsTab } from './warpgate-hosts-tab.component';
 
 /**
  * Toolbar Button Provider for Warpgate
@@ -31,31 +31,10 @@ export class WarpgateToolbarButtonProvider extends ToolbarButtonProvider {
         title: 'Warpgate Hosts',
         weight: 5,
         click: async () => {
-          this.openHostsTab();
+          openWarpgateHostsTab(this.app);
         },
       },
     ];
-  }
-
-  /**
-   * Open the Warpgate Hosts panel as a new tab
-   */
-  private openHostsTab(): void {
-    // Check if a hosts tab is already open
-    const existingTab = this.app.tabs.find(
-      (tab: any) => tab instanceof WarpgateHostsTabComponent
-    );
-
-    if (existingTab) {
-      // Focus existing tab instead of opening new one
-      this.app.selectTab(existingTab);
-      return;
-    }
-
-    // Open new hosts tab
-    this.app.openNewTab({
-      type: WarpgateHostsTabComponent,
-    });
   }
 }
 

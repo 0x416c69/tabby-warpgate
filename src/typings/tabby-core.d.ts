@@ -4,7 +4,7 @@
  */
 
 declare module 'tabby-core' {
-  import { NgModule, Type } from '@angular/core';
+  import { Type } from '@angular/core';
   import { Observable } from 'rxjs';
 
   export interface Profile {
@@ -28,9 +28,10 @@ declare module 'tabby-core' {
     name: string;
   };
 
+  // eslint-disable-next-line @typescript-eslint/no-unused-vars
   export interface NewTabParameters<T = any> {
-    type: string | TabComponentType<any>;
-    inputs?: T;
+    type: TabComponentType<any>;
+    inputs?: Record<string, any>;
   }
 
   export interface TabComponentType<T extends BaseTabComponent> {
@@ -68,7 +69,7 @@ declare module 'tabby-core' {
   }
 
   export abstract class HotkeyProvider {
-    abstract provide(): HotkeyDescription[];
+    abstract provide(): Promise<HotkeyDescription[]>;
   }
 
   export interface ToolbarButton {
@@ -86,36 +87,62 @@ declare module 'tabby-core' {
   export interface SelectorOption<T = void> {
     name: string;
     description?: string;
+    group?: string;
+    result?: T;
     icon?: string;
-    isGroup?: boolean;
-    callback?: () => T | Promise<T>;
+    color?: string;
+    weight?: number;
+    freeInputPattern?: string;
+    callback?: (query?: string) => void;
+  }
+
+  export interface RecoveryToken {
+    [key: string]: any;
+    type: string;
+  }
+
+  export abstract class TabRecoveryProvider<T extends BaseTabComponent = BaseTabComponent> {
+    abstract applicableTo(recoveryToken: RecoveryToken): Promise<boolean>;
+    abstract recover(recoveryToken: RecoveryToken): Promise<NewTabParameters<T>>;
   }
 
   export class ConfigService {
     store: any;
+    /** Fires once when the config is loaded */
+    readonly ready$: Observable<boolean>;
+    readonly changed$: Observable<void>;
     save(): void;
     requestRestart(): void;
   }
 
   export class NotificationsService {
-    info(message: string): void;
+    info(message: string, details?: string): void;
     notice(message: string): void;
-    error(message: string): void;
+    error(message: string, details?: string): void;
   }
 
   export class PlatformService {
     getOS(): string;
     getAppVersion(): string;
+    readClipboard(): string;
+    setClipboard(content: { text: string }): void;
+  }
+
+  export class HotkeysService {
+    /** Fired for each recognized hotkey */
+    readonly hotkey$: Observable<string>;
   }
 
   export class AppService {
     openNewTab<T extends BaseTabComponent>(params: NewTabParameters<T>): T;
     openNewTabRaw<T extends BaseTabComponent>(params: NewTabParameters<T>): T;
     selectTab(tab: BaseTabComponent | null): void;
+    getParentTab(tab: BaseTabComponent): SplitTabComponent | null;
     tabs: BaseTabComponent[];
     activeTab: BaseTabComponent | null;
-    tabOpened$: import('rxjs').Observable<any>;
-    tabClosed$: import('rxjs').Observable<any>;
+    readonly tabOpened$: Observable<BaseTabComponent>;
+    readonly tabClosed$: Observable<BaseTabComponent>;
+    readonly tabsChanged$: Observable<void>;
   }
 
   export class TabsService {
@@ -125,10 +152,12 @@ declare module 'tabby-core' {
   export abstract class BaseTabComponent {
     title: string;
     icon: string | null;
+    color: string | null;
     hasFocus: boolean;
     customTitle: string;
     hostView: any;
-    destroyed$: import('rxjs').Observable<void>;
+    parent: BaseTabComponent | null;
+    readonly destroyed$: Observable<void>;
 
     constructor(injector: import('@angular/core').Injector);
 
@@ -137,16 +166,25 @@ declare module 'tabby-core' {
     getRecoveryToken(): Promise<any>;
   }
 
+  export class SplitTabComponent extends BaseTabComponent {
+    readonly tabAdded$: Observable<BaseTabComponent>;
+    getAllTabs(): BaseTabComponent[];
+    getFocusedTab(): BaseTabComponent | null;
+    addTab(tab: BaseTabComponent, relative: BaseTabComponent | null, side: 'l' | 'r' | 't' | 'b'): Promise<void>;
+  }
+
   export class ProfilesService {
-    openNewTabForProfile(profile: Profile): Promise<void>;
-    getProfiles(): Profile[];
+    openNewTabForProfile(profile: PartialProfile<Profile>): Promise<BaseTabComponent | null>;
+    newTabParametersForProfile(profile: PartialProfile<Profile>): Promise<NewTabParameters<BaseTabComponent> | null>;
+    getConfigProxyForProfile<T extends Profile>(profile: PartialProfile<T>): T;
+    getProviders(): ProfileProvider<Profile>[];
+    getProfiles(): Promise<PartialProfile<Profile>[]>;
   }
 
   export class SelectorService {
-    show<T>(title: string, options: SelectorOption<T>[], config?: any): Promise<T>;
+    readonly active: boolean;
+    show<T>(name: string, options: SelectorOption<T>[]): Promise<T>;
   }
-
-  export class SplitTabComponent {}
 
   // The module is exported as default, not as a named export
   const TabbyCoreModule: any;

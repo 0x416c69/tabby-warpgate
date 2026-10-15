@@ -1,11 +1,16 @@
 /**
  * Warpgate Keyboard-Interactive Provider
- * Provides automatic OTP responses for Warpgate SSH connections
+ * Provides automatic OTP and password responses for Warpgate SSH connections
  */
 
 import { Injectable, Inject } from '@angular/core';
 import { WarpgateService } from '../services/warpgate.service';
 import { WarpgateSSHProfile } from '../services/warpgate-profile.service';
+import { parseWarpgateProfileId } from '../utils/profile-id';
+import {
+  isOtpPrompt as detectOtpPrompt,
+  isPasswordPrompt as detectPasswordPrompt,
+} from '../utils/prompt-detection';
 
 /**
  * Keyboard-interactive prompt from SSH server
@@ -17,7 +22,7 @@ export interface KeyboardInteractivePrompt {
 
 /**
  * Warpgate Keyboard-Interactive Handler
- * Automatically responds to OTP prompts during SSH authentication
+ * Computes automatic responses to OTP and password prompts during SSH authentication
  */
 @Injectable({ providedIn: 'root' })
 export class WarpgateKeyboardInteractiveHandler {
@@ -27,26 +32,21 @@ export class WarpgateKeyboardInteractiveHandler {
    * Check if a prompt is asking for OTP/2FA code
    */
   isOtpPrompt(prompt: string): boolean {
-    const otpPatterns = [
-      /one-?time/i,
-      /otp/i,
-      /2fa/i,
-      /two-?factor/i,
-      /verification\s*code/i,
-      /authenticator/i,
-      /totp/i,
-      /token/i,
-      /security\s*code/i,
-    ];
-
-    return otpPatterns.some(pattern => pattern.test(prompt));
+    return detectOtpPrompt(prompt);
   }
 
   /**
    * Check if a prompt is asking for password
    */
   isPasswordPrompt(prompt: string): boolean {
-    return /password/i.test(prompt);
+    return detectPasswordPrompt(prompt);
+  }
+
+  /**
+   * Find the Warpgate server of a profile (metadata or profile ID)
+   */
+  private getServerId(profile: WarpgateSSHProfile): string | null {
+    return profile.warpgate?.serverId ?? parseWarpgateProfileId(profile.id)?.serverId ?? null;
   }
 
   /**
@@ -57,30 +57,18 @@ export class WarpgateKeyboardInteractiveHandler {
     profile: WarpgateSSHProfile,
     prompt: KeyboardInteractivePrompt
   ): Promise<string | null> {
-    // Check if this is a Warpgate profile with OTP configured
-    if (!profile.warpgate) {
+    const serverId = this.getServerId(profile);
+    if (!serverId) {
       return null;
     }
 
-    const { serverId, otpCode } = profile.warpgate;
-
-    // Handle OTP prompts
+    // OTP codes are time based and single use, always generate a fresh one
     if (this.isOtpPrompt(prompt.prompt)) {
-      // If we have a pre-generated OTP code, use it
-      if (otpCode) {
-        return otpCode;
-      }
-
-      // Try to generate a fresh OTP code
-      const freshCode = await this.warpgateService.generateOtpCode(serverId);
-      if (freshCode) {
-        return freshCode;
-      }
+      return this.warpgateService.generateOtpCode(serverId);
     }
 
-    // Handle password prompts - use stored password from profile
-    if (this.isPasswordPrompt(prompt.prompt) && profile.options.password) {
-      return profile.options.password;
+    if (this.isPasswordPrompt(prompt.prompt)) {
+      return this.warpgateService.getServer(serverId)?.password || profile.options?.password || null;
     }
 
     return null;
@@ -97,8 +85,7 @@ export class WarpgateKeyboardInteractiveHandler {
     const responses: (string | null)[] = [];
 
     for (const prompt of prompts) {
-      const response = await this.getResponse(profile, prompt);
-      responses.push(response);
+      responses.push(await this.getResponse(profile, prompt));
     }
 
     return responses;

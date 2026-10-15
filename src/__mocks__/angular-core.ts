@@ -46,6 +46,12 @@ export function Output(_bindingPropertyName?: string): PropertyDecorator {
   };
 }
 
+export function HostListener(_eventName: string, _args?: string[]): MethodDecorator {
+  return function (_target: any, _propertyKey: string | symbol, _descriptor: PropertyDescriptor) {
+    // No-op decorator
+  };
+}
+
 export function ViewChild(_selector: any, _opts?: any): PropertyDecorator {
   return function (_target: any, _propertyKey: string | symbol) {
     // No-op decorator

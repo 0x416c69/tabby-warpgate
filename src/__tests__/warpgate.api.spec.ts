@@ -197,10 +197,14 @@ describe('WarpgateApiClient', () => {
 
   describe('testConnection', () => {
     it('should return success for valid connection', async () => {
-      mockFetch.mockResolvedValueOnce(createMockResponse({ started: true }));
+      mockFetch.mockResolvedValueOnce(createMockResponse({ username: null }));
 
       const result = await client.testConnection();
 
+      expect(mockFetch).toHaveBeenCalledWith(
+        'https://warpgate.example.com/@warpgate/api/info',
+        expect.any(Object)
+      );
       expect(result.success).toBe(true);
       expect(result.data).toBe(true);
     });
@@ -253,9 +257,14 @@ describe('WarpgateApiClient', () => {
       expect(client.getSshPort()).toBe(2222);
     });
 
-    it('should extract custom port from URL', () => {
-      const customClient = new WarpgateApiClient('https://warpgate.example.com:8443');
-      expect(customClient.getSshPort()).toBe(8443);
+    it('should not use the HTTP port from the URL as the SSH port', () => {
+      const customClient = new WarpgateApiClient('https://warpgate.example.com:8888');
+      expect(customClient.getSshPort()).toBe(2222);
+    });
+
+    it('should strip brackets from IPv6 hosts', () => {
+      const ipv6Client = new WarpgateApiClient('https://[::1]:8888');
+      expect(ipv6Client.getSshHost()).toBe('::1');
     });
   });
 
@@ -271,6 +280,91 @@ describe('WarpgateApiClient', () => {
       await client.login({ username: 'user', password: 'pass' });
 
       expect(client.getSessionCookie()).toBe('warpgate=session123');
+    });
+
+    it('should store the Warpgate session cookie name used by the server', async () => {
+      mockFetch.mockResolvedValueOnce(createMockResponse(
+        { success: true },
+        { headers: new Map([['set-cookie', 'warpgate-http-session=abc123; Path=/; HttpOnly']]) }
+      ));
+
+      await client.login({ username: 'user', password: 'pass' });
+
+      expect(client.getSessionCookie()).toBe('warpgate-http-session=abc123');
+    });
+
+    it('should keep the session when a later response sets an unrelated cookie', async () => {
+      client.setSessionCookie('warpgate-http-session=abc123');
+      mockFetch.mockResolvedValueOnce(createMockResponse(
+        [],
+        { headers: new Map([['set-cookie', 'lb=node-2; Path=/']]) }
+      ));
+
+      await client.getTargets();
+
+      expect(client.getSessionCookie()).toBe('warpgate-http-session=abc123; lb=node-2');
+    });
+
+    it('should split multiple cookies including Expires dates with commas', async () => {
+      mockFetch.mockResolvedValueOnce(createMockResponse(
+        { success: true },
+        {
+          headers: new Map([[
+            'set-cookie',
+            'lb=node-1; Expires=Wed, 21 Oct 2099 07:28:00 GMT; Path=/, warpgate-http-session=xyz; Path=/',
+          ]]),
+        }
+      ));
+
+      await client.login({ username: 'user', password: 'pass' });
+
+      expect(client.getSessionCookie()).toBe('lb=node-1; warpgate-http-session=xyz');
+    });
+
+    it('should drop cookies cleared by the server', async () => {
+      client.setSessionCookie('warpgate-http-session=abc123');
+      mockFetch.mockResolvedValueOnce(createMockResponse(
+        [],
+        { headers: new Map([['set-cookie', 'warpgate-http-session=; Max-Age=0; Path=/']]) }
+      ));
+
+      await client.getTargets();
+
+      expect(client.hasSession()).toBe(false);
+    });
+
+    it('should send stored cookies with requests', async () => {
+      client.setSessionCookie('warpgate-http-session=abc123');
+      mockFetch.mockResolvedValueOnce(createMockResponse([]));
+
+      await client.getTargets();
+
+      expect(mockFetch.mock.calls[0][1].headers.Cookie).toBe('warpgate-http-session=abc123');
+    });
+  });
+
+  describe('session validation', () => {
+    it('should report a valid session when info returns a username', async () => {
+      client.setSessionCookie('warpgate-http-session=abc123');
+      mockFetch.mockResolvedValueOnce(createMockResponse({ username: 'admin' }));
+
+      await expect(client.isSessionValid()).resolves.toBe(true);
+      expect(mockFetch).toHaveBeenCalledWith(
+        'https://warpgate.example.com/@warpgate/api/info',
+        expect.any(Object)
+      );
+    });
+
+    it('should report an invalid session when info has no username', async () => {
+      client.setSessionCookie('warpgate-http-session=abc123');
+      mockFetch.mockResolvedValueOnce(createMockResponse({ username: null }));
+
+      await expect(client.isSessionValid()).resolves.toBe(false);
+    });
+
+    it('should not call the server without a session cookie', async () => {
+      await expect(client.isSessionValid()).resolves.toBe(false);
+      expect(mockFetch).not.toHaveBeenCalled();
     });
   });
 
@@ -357,10 +451,9 @@ describe('WarpgateApiClient', () => {
   describe('self-service profile OTP', () => {
     it('should get profile credentials', async () => {
       const mockCredentials = {
-        password: true,
-        otp: ['otp-cred-1'],
-        publicKeys: [],
-        sso: false,
+        password: 'Set',
+        otp: [{ id: 'otp-cred-1' }],
+        public_keys: [],
       };
       mockFetch.mockResolvedValueOnce(createMockResponse(mockCredentials));
 
@@ -371,15 +464,32 @@ describe('WarpgateApiClient', () => {
         expect.any(Object)
       );
       expect(result.success).toBe(true);
-      expect(result.data?.otp).toEqual(['otp-cred-1']);
+      expect(result.data?.otp).toEqual([{ id: 'otp-cred-1' }]);
     });
 
-    it('should enable profile OTP', async () => {
-      const mockResponse = {
-        id: 'otp-cred-new',
-        secret: 'JBSWY3DPEHPK3PXP',
-      };
-      mockFetch.mockResolvedValueOnce(createMockResponse(mockResponse));
+    it('should return OTP credential IDs', async () => {
+      mockFetch.mockResolvedValueOnce(createMockResponse({
+        password: 'Set',
+        otp: [{ id: 'otp-cred-1' }, { id: 'otp-cred-2' }],
+        public_keys: [],
+      }));
+
+      const result = await client.getProfileOtpCredentialIds();
+
+      expect(result.success).toBe(true);
+      expect(result.data).toEqual(['otp-cred-1', 'otp-cred-2']);
+    });
+
+    it('should tolerate OTP credentials returned as plain IDs', async () => {
+      mockFetch.mockResolvedValueOnce(createMockResponse({ otp: ['otp-cred-1'] }));
+
+      const result = await client.getProfileOtpCredentialIds();
+
+      expect(result.data).toEqual(['otp-cred-1']);
+    });
+
+    it('should enable profile OTP with the decoded secret bytes', async () => {
+      mockFetch.mockResolvedValueOnce(createMockResponse({ id: 'otp-cred-new' }, { status: 201 }));
 
       const result = await client.enableProfileOtp('JBSWY3DPEHPK3PXP');
 
@@ -387,7 +497,7 @@ describe('WarpgateApiClient', () => {
         'https://warpgate.example.com/@warpgate/api/profile/credentials/otp',
         expect.objectContaining({
           method: 'POST',
-          body: JSON.stringify({ secret: 'JBSWY3DPEHPK3PXP' }),
+          body: JSON.stringify({ secret_key: [72, 101, 108, 108, 111, 33, 222, 173, 190, 239] }),
         })
       );
       expect(result.success).toBe(true);
@@ -409,13 +519,11 @@ describe('WarpgateApiClient', () => {
     });
 
     it('should check if profile has OTP enabled', async () => {
-      const mockCredentials = {
-        password: true,
-        otp: ['otp-cred-1'],
-        publicKeys: [],
-        sso: false,
-      };
-      mockFetch.mockResolvedValueOnce(createMockResponse(mockCredentials));
+      mockFetch.mockResolvedValueOnce(createMockResponse({
+        password: 'Set',
+        otp: [{ id: 'otp-cred-1' }],
+        public_keys: [],
+      }));
 
       const hasOtp = await client.hasProfileOtp();
 
@@ -423,13 +531,11 @@ describe('WarpgateApiClient', () => {
     });
 
     it('should return false when no OTP configured', async () => {
-      const mockCredentials = {
-        password: true,
+      mockFetch.mockResolvedValueOnce(createMockResponse({
+        password: 'Set',
         otp: [],
-        publicKeys: [],
-        sso: false,
-      };
-      mockFetch.mockResolvedValueOnce(createMockResponse(mockCredentials));
+        public_keys: [],
+      }));
 
       const hasOtp = await client.hasProfileOtp();
 
@@ -437,11 +543,7 @@ describe('WarpgateApiClient', () => {
     });
 
     it('should auto-setup OTP', async () => {
-      const mockResponse = {
-        id: 'otp-cred-auto',
-        secret: 'AUTO_GENERATED_SECRET',
-      };
-      mockFetch.mockResolvedValueOnce(createMockResponse(mockResponse));
+      mockFetch.mockResolvedValueOnce(createMockResponse({ id: 'otp-cred-auto' }, { status: 201 }));
 
       const result = await client.autoSetupOtp();
 
@@ -455,6 +557,11 @@ describe('WarpgateApiClient', () => {
       expect(result.data?.credentialId).toBe('otp-cred-auto');
       // The secret should be a valid Base32 string (generated internally)
       expect(result.data?.secret).toMatch(/^[A-Z2-7]+$/);
+
+      // The registered bytes must match the returned secret
+      const body = JSON.parse(mockFetch.mock.calls[0][1].body);
+      expect(Array.isArray(body.secret_key)).toBe(true);
+      expect(body.secret_key).toHaveLength(20);
     });
 
     it('should handle auto-setup OTP failure', async () => {
@@ -480,7 +587,7 @@ describe('WarpgateApiClient', () => {
       const result = await client.getUsers();
 
       expect(mockFetch).toHaveBeenCalledWith(
-        'https://warpgate.example.com/@warpgate/api/users',
+        'https://warpgate.example.com/@warpgate/admin/api/users',
         expect.any(Object)
       );
       expect(result.success).toBe(true);
@@ -494,7 +601,7 @@ describe('WarpgateApiClient', () => {
       const result = await client.getUser('user-1');
 
       expect(mockFetch).toHaveBeenCalledWith(
-        'https://warpgate.example.com/@warpgate/api/users/user-1',
+        'https://warpgate.example.com/@warpgate/admin/api/users/user-1',
         expect.any(Object)
       );
       expect(result.success).toBe(true);
@@ -546,7 +653,7 @@ describe('WarpgateApiClient', () => {
       const result = await client.getOtpCredentials('user-1');
 
       expect(mockFetch).toHaveBeenCalledWith(
-        'https://warpgate.example.com/@warpgate/api/users/user-1/credentials/otp',
+        'https://warpgate.example.com/@warpgate/admin/api/users/user-1/credentials/otp',
         expect.any(Object)
       );
       expect(result.success).toBe(true);
@@ -560,7 +667,7 @@ describe('WarpgateApiClient', () => {
       const result = await client.createOtpCredential('user-1', [1, 2, 3]);
 
       expect(mockFetch).toHaveBeenCalledWith(
-        'https://warpgate.example.com/@warpgate/api/users/user-1/credentials/otp',
+        'https://warpgate.example.com/@warpgate/admin/api/users/user-1/credentials/otp',
         expect.objectContaining({
           method: 'POST',
           body: JSON.stringify({ secret_key: [1, 2, 3] }),
@@ -575,7 +682,7 @@ describe('WarpgateApiClient', () => {
       const result = await client.deleteOtpCredential('user-1', 'cred-1');
 
       expect(mockFetch).toHaveBeenCalledWith(
-        'https://warpgate.example.com/@warpgate/api/users/user-1/credentials/otp/cred-1',
+        'https://warpgate.example.com/@warpgate/admin/api/users/user-1/credentials/otp/cred-1',
         expect.objectContaining({ method: 'DELETE' })
       );
       expect(result.success).toBe(true);
@@ -796,6 +903,63 @@ describe('WarpgateApiClient', () => {
 
       expect(result.success).toBe(true);
       expect(result.data?.state?.auth?.state).toBe('Rejected');
+    });
+
+    it('should treat a rejected credential as Rejected', async () => {
+      mockFetch.mockImplementationOnce(() => ({
+        ok: false,
+        status: 401,
+        headers: {
+          get: () => null,
+        },
+        text: async () => JSON.stringify({ state: 'PasswordNeeded', credential_rejected: true }),
+      }));
+
+      const result = await client.login({ username: 'user', password: 'wrong' });
+
+      expect(result.success).toBe(true);
+      expect(result.data?.state?.auth?.state).toBe('Rejected');
+      expect(result.data?.state?.auth?.reason).toBe('Invalid credentials');
+    });
+
+    it('should treat a locked account as Rejected', async () => {
+      mockFetch.mockImplementationOnce(() => ({
+        ok: false,
+        status: 401,
+        headers: {
+          get: () => null,
+        },
+        text: async () => JSON.stringify({ state: 'UserLocked' }),
+      }));
+
+      const result = await client.login({ username: 'user', password: 'pass' });
+
+      expect(result.data?.state?.auth?.state).toBe('Rejected');
+      expect(result.data?.state?.auth?.reason).toContain('locked');
+    });
+
+    it('should report unsupported second factors as Need', async () => {
+      mockFetch.mockImplementationOnce(() => ({
+        ok: false,
+        status: 401,
+        headers: {
+          get: () => null,
+        },
+        text: async () => JSON.stringify({ state: 'SsoNeeded' }),
+      }));
+
+      const result = await client.login({ username: 'user', password: 'pass' });
+
+      expect(result.data?.state?.auth?.state).toBe('Need');
+      expect(result.data?.state?.auth?.methods_remaining).toEqual(['Sso']);
+    });
+
+    it('should treat a 201 login response as Accepted', async () => {
+      mockFetch.mockResolvedValueOnce(createMockResponse(null, { status: 201 }));
+
+      const result = await client.login({ username: 'user', password: 'pass' });
+
+      expect(result.data?.state?.auth?.state).toBe('Accepted');
     });
 
     it('should handle NotStarted state as error', async () => {

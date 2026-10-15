@@ -3,7 +3,8 @@
  */
 
 declare module 'tabby-settings' {
-  import { NgModule, Type } from '@angular/core';
+  import { Type } from '@angular/core';
+  import { BaseTabComponent } from 'tabby-core';
 
   export abstract class SettingsTabProvider {
     id: string;
@@ -14,6 +15,11 @@ declare module 'tabby-settings' {
     prioritized?: boolean;
 
     getComponentType?(): Type<any> | null;
+  }
+
+  /** Tabby's settings tab, accepts the ID of the settings section to show as `activeTab` input */
+  export class SettingsTabComponent extends BaseTabComponent {
+    activeTab: string;
   }
 
   // The module is exported as default, not as a named export

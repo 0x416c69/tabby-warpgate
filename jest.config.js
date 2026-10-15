@@ -23,6 +23,9 @@ module.exports = {
   collectCoverageFrom: [
     'src/api/**/*.ts',
     'src/models/**/*.ts',
+    'src/services/**/*.ts',
+    'src/providers/**/*.ts',
+    'src/utils/**/*.ts',
     '!src/**/*.spec.ts',
     '!src/**/index.ts',
   ],
@@ -46,9 +49,7 @@ module.exports = {
   },
   setupFilesAfterEnv: ['<rootDir>/src/__tests__/setup.ts'],
   verbose: true,
-  // Ignore service and component tests that need Angular DI
   testPathIgnorePatterns: [
     '/node_modules/',
-    'warpgate-profile.service.spec.ts',
   ],
 };

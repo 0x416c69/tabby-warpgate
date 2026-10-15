@@ -79,6 +79,37 @@ Basic unit tests for individual methods (40+ tests).
 
 Comprehensive tests for the WarpgateApiClient covering all HTTP endpoints, error handling, and edge cases (80+ tests).
 
+### 5. **Service Regression Tests** ([service-regressions.spec.ts](src/__tests__/service-regressions.spec.ts))
+
+Connection, ticket and configuration behavior of `WarpgateService`:
+
+- Logins only count as connected when Warpgate accepts them (rejected passwords, unsupported second factors, failed OTP)
+- Valid web sessions are reused, expired ones trigger a new login and the request is retried (targets, tickets)
+- The SSH port comes from the server info, never from the HTTP URL; `external_host` and IPv6 handling
+- One-time tickets: expiry, never reused in connection details, claimed exactly once, ticket-only mode, permission errors
+- Ticket cleanup removes used and expired plugin tickets only
+- Enabling, disabling, editing and removing servers updates hosts and sessions
+- Config persistence of pinned hosts, view mode and the auto-refresh timer, waiting for Tabby's config to load
+- Loading state with several servers, OTP prompt cancellation, OTP removal, manual OTP during "Test connection"
+
+### 6. **Profile Provider Tests** ([warpgate-profile.service.spec.ts](src/__tests__/warpgate-profile.service.spec.ts))
+
+Builtin and one-click profiles, host customization applied to profiles, ticket and password fallback,
+profile descriptions for Tabby's selector and delegation to Tabby's SSH provider.
+
+### 7. **SSH Handler and Connection Tests** ([ssh-handler.spec.ts](src/__tests__/ssh-handler.spec.ts))
+
+- Detecting Warpgate tabs by profile ID (Tabby's profile proxies hide plugin metadata), split panes added later
+- Fresh credentials before every connection attempt: first connect, reconnect, duplicated and restored tabs
+- Host settings and queued snippets applied to the connection, history recorded once per tab
+- Keyboard-interactive answers per prompt (password and OTP), no repeated OTP codes, per-tab state
+- Opening hosts as tabs or as a split grid, quick connect ordering (pinned, recent, others)
+
+### 8. **Feature Tests** ([features.spec.ts](src/__tests__/features.spec.ts))
+
+Host settings, snippets, connection history, profile IDs, prompt detection, target icons and colors,
+host search ranking, split layout and hotkey defaults.
+
 ## Key Testing Principles
 
 ### 1. **Proxy-Based Config Testing**
@@ -158,9 +189,8 @@ npm test -- --watch
 
 ## Test Coverage Goals
 
-Current test coverage: **86.49%** (exceeds the 85% target)
-
-Minimum coverage thresholds are set in `jest.config.js`:
+Coverage is collected for the API client, models, services, providers and utilities
+(components are covered by their helper functions). Minimum thresholds are set in `jest.config.js`:
 
 ```javascript
 coverageThreshold: {
@@ -173,11 +203,7 @@ coverageThreshold: {
 }
 ```
 
-**Current Coverage Breakdown:**
-- Statements: 86.49%
-- Branches: 72.93%
-- Functions: 86.27%
-- Lines: 86.69%
+Run `npm test` to see the current coverage report.
 
 ## Bugs Caught by New Tests
 
@@ -190,11 +216,9 @@ These tests would have caught all the bugs we encountered:
 
 ## Future Improvements
 
-1. Add E2E tests with a real Warpgate test server
-2. Add performance tests for large numbers of servers
-3. Add tests for concurrent connection attempts
-4. Add tests for network interruption scenarios
-5. Add tests for session expiration and renewal
+1. Add E2E tests with a real Warpgate test server and Tabby
+2. Add performance tests for large numbers of servers and hosts
+3. Add tests for network interruption scenarios
 
 ## Mock Files
 

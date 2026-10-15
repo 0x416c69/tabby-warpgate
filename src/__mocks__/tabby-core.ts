@@ -124,4 +124,29 @@ export const TabbyCoreModule = {
   ngModule: class {},
 };
 
-export class SplitTabComponent {}
+export class BaseTabComponent {
+  title = '';
+  icon: string | null = null;
+  color: string | null = null;
+  parent: any = null;
+
+  constructor(_injector?: any) {}
+
+  setTitle(title: string): void {
+    this.title = title;
+  }
+
+  destroy(): void {}
+
+  async getRecoveryToken(): Promise<any> {
+    return null;
+  }
+}
+
+export class SplitTabComponent extends BaseTabComponent {}
+
+export class TabRecoveryProvider {}
+
+export class HotkeysService {}
+
+export class TabsService {}

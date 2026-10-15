@@ -12,11 +12,25 @@ import { DEFAULT_WARPGATE_CONFIG } from '../models/warpgate.models';
  */
 @Injectable()
 export class WarpgateConfigProvider extends ConfigProvider {
-  /** Plugin configuration namespace */
-  platformDefaults = {};
-
   /** Default configuration values */
   defaults = {
     warpgate: DEFAULT_WARPGATE_CONFIG,
+    hotkeys: {
+      'warpgate-show-hosts': ['Ctrl-Shift-H'],
+      'warpgate-quick-connect': ['Ctrl-Shift-K'],
+      'warpgate-run-snippet': ['Ctrl-Shift-J'],
+      'warpgate-refresh': [],
+    },
+  };
+
+  /** Platform specific defaults */
+  platformDefaults = {
+    macOS: {
+      hotkeys: {
+        'warpgate-show-hosts': ['⌘-Shift-H'],
+        'warpgate-quick-connect': ['⌘-Shift-K'],
+        'warpgate-run-snippet': ['⌘-Shift-J'],
+      },
+    },
   };
 }

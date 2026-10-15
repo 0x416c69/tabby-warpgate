@@ -18,9 +18,16 @@ import {
   WarpgateProfileCredentials,
   WarpgateOtpEnableResponse,
 } from '../models/warpgate.models';
+import { base32Decode, generateTOTPSecret } from '../utils/totp';
 import { createLogger } from '../utils/debug-logger';
 
 const log = createLogger('API');
+
+/** Default SSH port used by Warpgate */
+export const DEFAULT_WARPGATE_SSH_PORT = 2222;
+
+/** Maximum time to wait for a single HTTP request */
+const REQUEST_TIMEOUT_MS = 30000;
 
 /** HTTP methods supported by the API client */
 type HttpMethod = 'GET' | 'POST' | 'DELETE' | 'PUT' | 'PATCH';
@@ -34,10 +41,26 @@ interface RequestOptions {
 }
 
 /** API response wrapper */
-interface ApiResponse<T> {
+export interface ApiResponse<T> {
   success: boolean;
   data?: T;
   error?: WarpgateApiError;
+}
+
+/** Internal auth state mapped from a Warpgate ApiAuthState value */
+type MappedAuthState = WarpgateAuthState['auth'];
+
+/**
+ * Split a Set-Cookie header value into individual cookies.
+ * Multiple cookies may be separated by newlines (Node.js header arrays joined by us)
+ * or by commas (Fetch API). Commas inside Expires dates are not treated as separators.
+ */
+export function splitSetCookieHeader(header: string): string[] {
+  return header
+    .split('\n')
+    .flatMap(line => line.split(/,(?=\s*[^;,=\s]+=)/))
+    .map(cookie => cookie.trim())
+    .filter(Boolean);
 }
 
 /**
@@ -46,7 +69,7 @@ interface ApiResponse<T> {
  */
 export class WarpgateApiClient {
   private baseUrl: string;
-  private sessionCookie: string | null = null;
+  private cookies = new Map<string, string>();
   private trustSelfSigned: boolean;
 
   constructor(serverUrl: string, trustSelfSigned = false) {
@@ -66,24 +89,72 @@ export class WarpgateApiClient {
   }
 
   /**
-   * Set the session cookie for authenticated requests
+   * Set the session cookie(s) for authenticated requests
+   * Accepts a Cookie header value ("name=value; other=value") or null to clear
    */
   setSessionCookie(cookie: string | null): void {
-    this.sessionCookie = cookie;
+    this.cookies.clear();
+    if (!cookie) {
+      return;
+    }
+    for (const part of cookie.split(';')) {
+      const separator = part.indexOf('=');
+      if (separator <= 0) {
+        continue;
+      }
+      const name = part.slice(0, separator).trim();
+      const value = part.slice(separator + 1).trim();
+      if (name) {
+        this.cookies.set(name, value);
+      }
+    }
   }
 
   /**
-   * Get the current session cookie
+   * Get the current session cookie(s) as a Cookie header value
    */
   getSessionCookie(): string | null {
-    return this.sessionCookie;
+    if (this.cookies.size === 0) {
+      return null;
+    }
+    return Array.from(this.cookies.entries())
+      .map(([name, value]) => `${name}=${value}`)
+      .join('; ');
   }
 
   /**
    * Check if the client has an active session
    */
   hasSession(): boolean {
-    return this.sessionCookie !== null;
+    return this.cookies.size > 0;
+  }
+
+  /**
+   * Build fetch options shared by all requests
+   */
+  private buildFetchOptions(options: RequestOptions): RequestInit {
+    const headers: Record<string, string> = {
+      'Content-Type': 'application/json',
+      Accept: 'application/json',
+      ...options.headers,
+    };
+
+    const cookie = this.getSessionCookie();
+    if (cookie) {
+      headers['Cookie'] = cookie;
+    }
+
+    const fetchOptions: RequestInit = {
+      method: options.method,
+      headers,
+      credentials: options.credentials || 'include',
+    };
+
+    if (options.body && options.method !== 'GET') {
+      fetchOptions.body = JSON.stringify(options.body);
+    }
+
+    return fetchOptions;
   }
 
   /**
@@ -100,34 +171,9 @@ export class WarpgateApiClient {
     const apiPath = useAdminApi ? '/@warpgate/admin/api' : '/@warpgate/api';
     const url = `${this.baseUrl}${apiPath}${endpoint}`;
 
-    const headers: Record<string, string> = {
-      'Content-Type': 'application/json',
-      Accept: 'application/json',
-      ...options.headers,
-    };
-
-    if (this.sessionCookie) {
-      headers['Cookie'] = this.sessionCookie;
-    }
-
-    const fetchOptions: RequestInit = {
-      method: options.method,
-      headers,
-      credentials: options.credentials || 'include',
-    };
-
-    if (options.body && options.method !== 'GET') {
-      fetchOptions.body = JSON.stringify(options.body);
-    }
-
     try {
-      const response = await this.performFetch(url, fetchOptions);
-
-      // Extract and store cookies from response
-      const setCookie = response.headers.get('set-cookie');
-      if (setCookie) {
-        this.sessionCookie = this.parseSetCookie(setCookie);
-      }
+      const response = await this.performFetch(url, this.buildFetchOptions(options));
+      this.storeResponseCookies(response);
 
       if (!response.ok) {
         const errorText = await response.text();
@@ -173,30 +219,40 @@ export class WarpgateApiClient {
       const data = JSON.parse(text) as T;
       return { success: true, data };
     } catch (error) {
-      let errorMessage = 'Unknown error';
-      if (error instanceof Error) {
-        errorMessage = error.message;
-        // Provide more helpful messages for common errors
-        if (errorMessage.includes('ECONNREFUSED')) {
-          errorMessage = 'Connection refused - server may be down or URL is incorrect';
-        } else if (errorMessage.includes('ENOTFOUND') || errorMessage.includes('getaddrinfo')) {
-          errorMessage = 'Server not found - check the URL';
-        } else if (errorMessage.includes('ETIMEDOUT') || errorMessage.includes('ESOCKETTIMEDOUT')) {
-          errorMessage = 'Connection timed out - server may be unreachable';
-        } else if (errorMessage.includes('CERT') || errorMessage.includes('certificate')) {
-          errorMessage = 'Certificate error - try enabling "Trust self-signed certificates"';
-        } else if (errorMessage.includes('ECONNRESET')) {
-          errorMessage = 'Connection reset - server closed the connection';
-        }
-      }
       return {
         success: false,
         error: {
           status: 0,
-          message: errorMessage,
+          message: this.describeNetworkError(error),
         },
       };
     }
+  }
+
+  /**
+   * Turn low level network errors into user friendly messages
+   */
+  private describeNetworkError(error: unknown): string {
+    if (!(error instanceof Error)) {
+      return 'Unknown error';
+    }
+    const message = error.message;
+    if (message.includes('ECONNREFUSED')) {
+      return 'Connection refused - server may be down or URL is incorrect';
+    }
+    if (message.includes('ENOTFOUND') || message.includes('getaddrinfo')) {
+      return 'Server not found - check the URL';
+    }
+    if (message.includes('ETIMEDOUT') || message.includes('ESOCKETTIMEDOUT')) {
+      return 'Connection timed out - server may be unreachable';
+    }
+    if (message.includes('CERT') || message.includes('certificate')) {
+      return 'Certificate error - try enabling "Trust self-signed certificates"';
+    }
+    if (message.includes('ECONNRESET')) {
+      return 'Connection reset - server closed the connection';
+    }
+    return message;
   }
 
   /**
@@ -211,7 +267,6 @@ export class WarpgateApiClient {
       // eslint-disable-next-line @typescript-eslint/no-require-imports
       const https = require('https');
       if (https) {
-        log.debug(' Using Node.js fetch');
         return this.nodeFetch(url, options);
       }
     } catch {
@@ -219,7 +274,7 @@ export class WarpgateApiClient {
     }
 
     // Fallback to browser fetch (won't work properly for cookies)
-    log.debug(' Using browser fetch (cookies may not work)');
+    log.debug('Using browser fetch (cookies may not work)');
     return fetch(url, options);
   }
 
@@ -248,11 +303,7 @@ export class WarpgateApiClient {
         rejectUnauthorized: !this.trustSelfSigned,
       };
 
-      log.debug(' HTTP Request:', {
-        method: requestOptions.method,
-        url: `${urlObj.protocol}//${urlObj.hostname}:${requestOptions.port}${requestOptions.path}`,
-        hasCookie: !!(options.headers as Record<string, string>)?.['Cookie'],
-      });
+      log.debug('HTTP request:', requestOptions.method, `${urlObj.origin}${urlObj.pathname}`);
 
       const req = transport.request(requestOptions, (res: NodeResponse) => {
         const chunks: Buffer[] = [];
@@ -261,20 +312,15 @@ export class WarpgateApiClient {
         res.on('end', () => {
           const body = Buffer.concat(chunks).toString('utf-8');
 
-          log.debug(' HTTP Response:', {
-            status: res.statusCode,
-            statusMessage: res.statusMessage,
-            hasSetCookie: !!res.headers['set-cookie'],
-            setCookieRaw: res.headers['set-cookie'],
-            bodyLength: body.length,
-            bodyPreview: body.substring(0, 300),
-          });
+          log.debug('HTTP response:', res.statusCode, `${urlObj.pathname}`, `${body.length} bytes`);
 
           // Create a Response-like object
+          // Set-Cookie arrays are joined with newlines so individual cookies can be split reliably
           const responseHeaders = new Map<string, string>();
           Object.entries(res.headers).forEach(([key, value]) => {
             if (value) {
-              responseHeaders.set(key, Array.isArray(value) ? value.join(', ') : value);
+              const separator = key === 'set-cookie' ? '\n' : ', ';
+              responseHeaders.set(key, Array.isArray(value) ? value.join(separator) : value);
             }
           });
 
@@ -291,6 +337,13 @@ export class WarpgateApiClient {
 
           resolve(response);
         });
+        res.on('error', (err: Error) => {
+          reject(new Error(`Network error: ${err.message}`));
+        });
+      });
+
+      req.setTimeout(REQUEST_TIMEOUT_MS, () => {
+        req.destroy(new Error('ETIMEDOUT: request timed out'));
       });
 
       req.on('error', (err: Error) => {
@@ -306,52 +359,64 @@ export class WarpgateApiClient {
   }
 
   /**
-   * Parse Set-Cookie header to extract session cookie
+   * Store cookies from a response's Set-Cookie header in the cookie jar
+   * Cookies that are cleared by the server (empty value, expired) are removed
    */
-  private parseSetCookie(setCookie: string): string {
-    log.debug(' Parsing Set-Cookie:', setCookie);
-
-    // Extract the warpgate session cookie
-    // The setCookie string might be comma-separated (multiple cookies) or just one
-    const cookies = setCookie.split(',').map(c => c.trim());
-    for (const cookie of cookies) {
-      if (cookie.startsWith('warpgate=') || cookie.includes('warpgate=')) {
-        const match = cookie.match(/warpgate=([^;]+)/);
-        if (match) {
-          const result = `warpgate=${match[1]}`;
-          log.debug(' Extracted session cookie:', result);
-          return result;
-        }
-      }
+  private storeResponseCookies(response: Response): void {
+    const setCookie = response.headers?.get('set-cookie');
+    if (!setCookie) {
+      return;
     }
 
-    // Fallback: take the first cookie
-    const fallback = setCookie.split(';')[0];
-    log.debug(' Using fallback cookie:', fallback);
-    return fallback;
+    for (const cookie of splitSetCookieHeader(setCookie)) {
+      const [pair, ...attributes] = cookie.split(';');
+      const separator = pair.indexOf('=');
+      if (separator <= 0) {
+        continue;
+      }
+      const name = pair.slice(0, separator).trim();
+      const value = pair.slice(separator + 1).trim();
+      const expired = attributes.some(attribute => {
+        const [key, ...rest] = attribute.split('=');
+        const attrName = key.trim().toLowerCase();
+        const attrValue = rest.join('=').trim();
+        if (attrName === 'max-age') {
+          return parseInt(attrValue, 10) <= 0;
+        }
+        if (attrName === 'expires') {
+          const expiresAt = Date.parse(attrValue);
+          return !isNaN(expiresAt) && expiresAt <= Date.now();
+        }
+        return false;
+      });
+
+      if (!value || expired) {
+        this.cookies.delete(name);
+      } else {
+        this.cookies.set(name, value);
+      }
+    }
+    log.debug('Session cookies updated:', Array.from(this.cookies.keys()));
   }
 
   /**
    * Authenticate with Warpgate server
    * Warpgate uses HTTP status codes to indicate auth state:
    * - 401 with {"state":"OtpNeeded"} = password OK, need OTP
-   * - 401 with other = bad credentials
-   * - 200 = fully authenticated
+   * - 401 with other state = bad credentials or another factor required
+   * - 2xx = fully authenticated
    */
   async login(credentials: WarpgateLoginRequest): Promise<ApiResponse<WarpgateLoginResponse>> {
-    log.debug(' Starting login flow for:', credentials.username);
+    log.debug('Starting login flow for:', credentials.username);
 
-    // Submit credentials - Warpgate returns 401 with state in body
-    log.debug(' Submitting credentials...');
-    const response = await this.requestWithAuthState<WarpgateAuthState>('/auth/login', {
+    const response = await this.requestWithAuthState('/auth/login', {
       method: 'POST',
       body: credentials,
     });
 
-    log.debug(' Login response:', {
+    log.debug('Login result:', {
       success: response.success,
-      hasData: !!response.data,
-      authState: response.data,
+      authState: response.data?.state?.auth?.state,
       error: response.error?.message,
     });
 
@@ -359,47 +424,55 @@ export class WarpgateApiClient {
   }
 
   /**
+   * Map a Warpgate ApiAuthState value to the internal auth state
+   */
+  private mapAuthState(state: string, credentialRejected: boolean): MappedAuthState {
+    if (credentialRejected) {
+      return { state: 'Rejected', methods_remaining: [], reason: 'Invalid credentials' };
+    }
+
+    switch (state) {
+      case 'Success':
+        return { state: 'Accepted', methods_remaining: [] };
+      case 'OtpNeeded':
+        return { state: 'Need', methods_remaining: ['Otp'] };
+      case 'PasswordNeeded':
+        return { state: 'Need', methods_remaining: ['Password'] };
+      case 'SsoNeeded':
+        return { state: 'Need', methods_remaining: ['Sso'] };
+      case 'WebUserApprovalNeeded':
+        return { state: 'Need', methods_remaining: ['WebUserApproval'] };
+      case 'PublicKeyNeeded':
+        return { state: 'Need', methods_remaining: ['PublicKey'] };
+      case 'IpBlocked':
+      case 'IpRejected':
+        return { state: 'Rejected', methods_remaining: [], reason: 'Login from this IP address is not allowed' };
+      case 'UserLocked':
+        return { state: 'Rejected', methods_remaining: [], reason: 'User account is locked' };
+      case 'Failed':
+      case 'Rejected':
+        return { state: 'Rejected', methods_remaining: [], reason: 'Invalid credentials' };
+      default:
+        return { state: 'Progress', methods_remaining: [] };
+    }
+  }
+
+  /**
    * Special request handler for Warpgate auth endpoints
    * Warpgate returns auth state in 401 response bodies
    */
-  private async requestWithAuthState<T>(
+  private async requestWithAuthState(
     endpoint: string,
     options: RequestOptions = { method: 'GET' }
   ): Promise<ApiResponse<WarpgateLoginResponse>> {
     const url = `${this.baseUrl}/@warpgate/api${endpoint}`;
 
-    const headers: Record<string, string> = {
-      'Content-Type': 'application/json',
-      Accept: 'application/json',
-      ...options.headers,
-    };
-
-    if (this.sessionCookie) {
-      headers['Cookie'] = this.sessionCookie;
-    }
-
-    const fetchOptions: RequestInit = {
-      method: options.method,
-      headers,
-      credentials: options.credentials || 'include',
-    };
-
-    if (options.body && options.method !== 'GET') {
-      fetchOptions.body = JSON.stringify(options.body);
-    }
-
     try {
-      const response = await this.performFetch(url, fetchOptions);
-
-      // Extract and store cookies from response
-      const setCookie = response.headers.get('set-cookie');
-      if (setCookie) {
-        this.sessionCookie = this.parseSetCookie(setCookie);
-        log.debug(' Session cookie set');
-      }
+      const response = await this.performFetch(url, this.buildFetchOptions(options));
+      this.storeResponseCookies(response);
 
       const text = await response.text();
-      log.debug(' Response:', response.status, text);
+      log.debug('Auth response status:', response.status);
 
       // Parse the response body
       let stateData: any = null;
@@ -411,7 +484,7 @@ export class WarpgateApiClient {
         }
       }
 
-      // 200 = fully authenticated
+      // 2xx = fully authenticated
       if (response.ok) {
         return {
           success: true,
@@ -427,11 +500,10 @@ export class WarpgateApiClient {
         };
       }
 
-      // 401 with state = auth in progress
-      if (response.status === 401 && stateData?.state) {
+      // 401 with state = auth in progress or rejected
+      if (response.status === 401 && typeof stateData?.state === 'string') {
         const authState = stateData.state;
-        log.debug(' Auth state from 401:', authState);
-        log.debug(' Current session cookie:', this.sessionCookie);
+        log.debug('Auth state from 401:', authState);
 
         // NotStarted means session was lost - treat as error
         if (authState === 'NotStarted') {
@@ -445,20 +517,6 @@ export class WarpgateApiClient {
           };
         }
 
-        // Map Warpgate states to our internal format
-        let internalState: 'NotStarted' | 'Progress' | 'Need' | 'Accepted' | 'Rejected' = 'Progress';
-        let methodsRemaining: string[] = [];
-
-        if (authState === 'OtpNeeded') {
-          internalState = 'Need';
-          methodsRemaining = ['Otp'];
-        } else if (authState === 'PasswordNeeded') {
-          internalState = 'Need';
-          methodsRemaining = ['Password'];
-        } else if (authState === 'Failed' || authState === 'Rejected') {
-          internalState = 'Rejected';
-        }
-
         return {
           success: true,
           data: {
@@ -467,16 +525,13 @@ export class WarpgateApiClient {
               protocol: 'http',
               address: '',
               started: true,
-              auth: {
-                state: internalState,
-                methods_remaining: methodsRemaining,
-              },
+              auth: this.mapAuthState(authState, stateData.credential_rejected === true),
             },
           },
         };
       }
 
-      // Other 401 = invalid credentials
+      // Other errors = invalid credentials or server problem
       return {
         success: false,
         error: {
@@ -506,14 +561,16 @@ export class WarpgateApiClient {
     });
 
     if (response.success) {
-      this.sessionCookie = null;
+      this.cookies.clear();
     }
 
     return response;
   }
 
   /**
-   * Get current authentication state
+   * Get the pending authentication state
+   * Note: Warpgate returns 404 when there is no authentication in progress
+   * (including for sessions that are already fully authenticated)
    */
   async getAuthState(): Promise<ApiResponse<WarpgateAuthState>> {
     return this.request<WarpgateAuthState>('/auth/state');
@@ -553,11 +610,23 @@ export class WarpgateApiClient {
   }
 
   /**
-   * Test connection to server
+   * Check whether the current session is authenticated
+   */
+  async isSessionValid(): Promise<boolean> {
+    if (!this.hasSession()) {
+      return false;
+    }
+    const info = await this.getUserInfo();
+    return !!(info.success && info.data?.username);
+  }
+
+  /**
+   * Test that the server is reachable
+   * Uses the info endpoint, which answers for both anonymous and authenticated sessions
    */
   async testConnection(): Promise<ApiResponse<boolean>> {
     try {
-      const response = await this.request<WarpgateAuthState>('/auth/state');
+      const response = await this.request<WarpgateUserInfo>('/info');
       if (!response.success) {
         return {
           success: false,
@@ -587,15 +656,14 @@ export class WarpgateApiClient {
    * Uses requestWithAuthState to properly handle Warpgate's 401-based auth flow
    */
   async submitOtp(otp: string): Promise<ApiResponse<WarpgateLoginResponse>> {
-    log.debug(' Submitting OTP code...');
-    const response = await this.requestWithAuthState<WarpgateAuthState>('/auth/otp', {
+    log.debug('Submitting OTP code');
+    const response = await this.requestWithAuthState('/auth/otp', {
       method: 'POST',
       body: { otp },
     });
 
-    log.debug(' OTP response:', {
+    log.debug('OTP result:', {
       success: response.success,
-      hasData: !!response.data,
       authState: response.data?.state?.auth?.state,
       error: response.error?.message,
     });
@@ -627,7 +695,7 @@ export class WarpgateApiClient {
    * @param ticketId The ticket UUID to delete
    */
   async deleteTicket(ticketId: string): Promise<ApiResponse<void>> {
-    return this.request<void>(`/tickets/${ticketId}`, {
+    return this.request<void>(`/tickets/${encodeURIComponent(ticketId)}`, {
       method: 'DELETE',
     }, true); // Use admin API
   }
@@ -650,7 +718,7 @@ export class WarpgateApiClient {
   generateTicketConnectionString(
     ticketSecret: string,
     warpgateHost: string,
-    port = 2222
+    port = DEFAULT_WARPGATE_SSH_PORT
   ): string {
     return `ticket-${ticketSecret}@${warpgateHost}:${port}`;
   }
@@ -676,7 +744,7 @@ export class WarpgateApiClient {
   getSshHost(): string {
     try {
       const url = new URL(this.baseUrl);
-      return url.hostname;
+      return url.hostname.replace(/^\[(.*)\]$/, '$1');
     } catch {
       // Fallback: try to extract hostname manually
       const match = this.baseUrl.match(/(?:https?:\/\/)?([^:/]+)/);
@@ -685,23 +753,19 @@ export class WarpgateApiClient {
   }
 
   /**
-   * Get the SSH port (default Warpgate SSH port is 2222)
+   * Get the default SSH port
+   * The port in the server URL is the HTTP(S) port and is never the SSH port,
+   * the actual SSH port is reported by the server info endpoint when available
    */
   getSshPort(): number {
-    try {
-      const url = new URL(this.baseUrl);
-      // Warpgate typically uses port 2222 for SSH, not the HTTPS port
-      return url.port ? parseInt(url.port, 10) : 2222;
-    } catch {
-      return 2222;
-    }
+    return DEFAULT_WARPGATE_SSH_PORT;
   }
 
   /**
    * Get list of all users (admin API)
    */
   async getUsers(): Promise<ApiResponse<WarpgateUser[]>> {
-    return this.request<WarpgateUser[]>('/users');
+    return this.request<WarpgateUser[]>('/users', { method: 'GET' }, true);
   }
 
   /**
@@ -709,7 +773,7 @@ export class WarpgateApiClient {
    * @param userId User ID
    */
   async getUser(userId: string): Promise<ApiResponse<WarpgateUser>> {
-    return this.request<WarpgateUser>(`/users/${userId}`);
+    return this.request<WarpgateUser>(`/users/${encodeURIComponent(userId)}`, { method: 'GET' }, true);
   }
 
   /**
@@ -731,7 +795,11 @@ export class WarpgateApiClient {
    * @param userId User ID
    */
   async getOtpCredentials(userId: string): Promise<ApiResponse<WarpgateOtpCredential[]>> {
-    return this.request<WarpgateOtpCredential[]>(`/users/${userId}/credentials/otp`);
+    return this.request<WarpgateOtpCredential[]>(
+      `/users/${encodeURIComponent(userId)}/credentials/otp`,
+      { method: 'GET' },
+      true
+    );
   }
 
   /**
@@ -743,10 +811,10 @@ export class WarpgateApiClient {
     userId: string,
     secretKey: number[]
   ): Promise<ApiResponse<WarpgateOtpCredential>> {
-    return this.request<WarpgateOtpCredential>(`/users/${userId}/credentials/otp`, {
+    return this.request<WarpgateOtpCredential>(`/users/${encodeURIComponent(userId)}/credentials/otp`, {
       method: 'POST',
       body: { secret_key: secretKey },
-    });
+    }, true);
   }
 
   /**
@@ -755,9 +823,11 @@ export class WarpgateApiClient {
    * @param credentialId Credential ID
    */
   async deleteOtpCredential(userId: string, credentialId: string): Promise<ApiResponse<void>> {
-    return this.request<void>(`/users/${userId}/credentials/otp/${credentialId}`, {
-      method: 'DELETE',
-    });
+    return this.request<void>(
+      `/users/${encodeURIComponent(userId)}/credentials/otp/${encodeURIComponent(credentialId)}`,
+      { method: 'DELETE' },
+      true
+    );
   }
 
   /**
@@ -783,14 +853,29 @@ export class WarpgateApiClient {
   }
 
   /**
+   * Get the IDs of the current user's OTP credentials (self-service)
+   */
+  async getProfileOtpCredentialIds(): Promise<ApiResponse<string[]>> {
+    const response = await this.getProfileCredentials();
+    if (!response.success) {
+      return { success: false, error: response.error };
+    }
+    const otp: unknown[] = Array.isArray(response.data?.otp) ? response.data!.otp : [];
+    const ids = otp
+      .map(entry => (typeof entry === 'string' ? entry : (entry as WarpgateOtpCredential | null)?.id))
+      .filter((id): id is string => typeof id === 'string' && id.length > 0);
+    return { success: true, data: ids };
+  }
+
+  /**
    * Enable OTP for the current user (self-service)
-   * Generates a new TOTP secret and registers it with Warpgate
+   * Registers the given TOTP secret with Warpgate
    * @param secret Base32-encoded TOTP secret to register
    */
   async enableProfileOtp(secret: string): Promise<ApiResponse<WarpgateOtpEnableResponse>> {
     return this.request<WarpgateOtpEnableResponse>('/profile/credentials/otp', {
       method: 'POST',
-      body: { secret },
+      body: { secret_key: Array.from(base32Decode(secret)) },
     });
   }
 
@@ -799,7 +884,7 @@ export class WarpgateApiClient {
    * @param credentialId The OTP credential ID to remove
    */
   async disableProfileOtp(credentialId: string): Promise<ApiResponse<void>> {
-    return this.request<void>(`/profile/credentials/otp/${credentialId}`, {
+    return this.request<void>(`/profile/credentials/otp/${encodeURIComponent(credentialId)}`, {
       method: 'DELETE',
     });
   }
@@ -808,8 +893,8 @@ export class WarpgateApiClient {
    * Check if current user has OTP enabled (self-service)
    */
   async hasProfileOtp(): Promise<boolean> {
-    const response = await this.getProfileCredentials();
-    return !!(response.success && response.data && response.data.otp && response.data.otp.length > 0);
+    const response = await this.getProfileOtpCredentialIds();
+    return !!(response.success && response.data && response.data.length > 0);
   }
 
   /**
@@ -819,7 +904,7 @@ export class WarpgateApiClient {
    */
   async autoSetupOtp(): Promise<ApiResponse<{ secret: string; credentialId: string }>> {
     // Generate a random TOTP secret
-    const secret = this.generateTotpSecret();
+    const secret = generateTOTPSecret();
 
     // Register it with Warpgate
     const response = await this.enableProfileOtp(secret);
@@ -842,48 +927,6 @@ export class WarpgateApiClient {
       },
     };
   }
-
-  /**
-   * Generate a random Base32-encoded TOTP secret
-   * @param length Number of bytes (default: 20 for 160-bit secret)
-   */
-  private generateTotpSecret(length = 20): string {
-    const BASE32_CHARS = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ234567';
-    let randomBytes: Uint8Array;
-
-    // Check environment for crypto
-    if (typeof window !== 'undefined' && window.crypto?.getRandomValues) {
-      randomBytes = new Uint8Array(length);
-      window.crypto.getRandomValues(randomBytes);
-    } else {
-      // Node.js environment
-      // eslint-disable-next-line @typescript-eslint/no-require-imports
-      const crypto = require('crypto');
-      randomBytes = new Uint8Array(crypto.randomBytes(length));
-    }
-
-    // Encode to Base32
-    let result = '';
-    let buffer = 0;
-    let bitsLeft = 0;
-
-    for (let i = 0; i < randomBytes.length; i++) {
-      buffer = (buffer << 8) | randomBytes[i];
-      bitsLeft += 8;
-
-      while (bitsLeft >= 5) {
-        bitsLeft -= 5;
-        result += BASE32_CHARS[(buffer >> bitsLeft) & 0x1f];
-      }
-    }
-
-    // Handle remaining bits
-    if (bitsLeft > 0) {
-      result += BASE32_CHARS[(buffer << (5 - bitsLeft)) & 0x1f];
-    }
-
-    return result;
-  }
 }
 
 /** Node.js HTTP response interface */
@@ -893,4 +936,5 @@ interface NodeResponse {
   headers: Record<string, string | string[] | undefined>;
   on(event: 'data', callback: (chunk: Buffer) => void): void;
   on(event: 'end', callback: () => void): void;
+  on(event: 'error', callback: (err: Error) => void): void;
 }

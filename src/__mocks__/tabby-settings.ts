@@ -11,6 +11,10 @@ export class SettingsTabProvider {
   weight = 0;
 }
 
+export class SettingsTabComponent {
+  activeTab = '';
+}
+
 export const TabbySettingsModule = {
   ngModule: class {},
 };

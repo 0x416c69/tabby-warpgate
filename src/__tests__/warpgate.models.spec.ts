@@ -29,6 +29,9 @@ describe('Warpgate Models', () => {
         debugMode: false,
         pinnedHosts: [],
         viewMode: 'grid',
+        hostSettings: {},
+        snippets: [],
+        history: [],
       });
     });
 
@@ -195,6 +198,9 @@ describe('Warpgate Models', () => {
         debugMode: false,
         pinnedHosts: [],
         viewMode: 'grid',
+        hostSettings: {},
+        snippets: [],
+        history: [],
       };
 
       expect(config.servers).toHaveLength(1);

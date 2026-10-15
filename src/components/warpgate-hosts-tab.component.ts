@@ -1,10 +1,13 @@
 /**
  * Warpgate Hosts Tab Component
- * A tab that shows all Warpgate hosts with the nice UI
+ * A tab that shows all Warpgate hosts, snippets and history
  */
 
 import { Component, Injector } from '@angular/core';
-import { BaseTabComponent } from 'tabby-core';
+import { AppService, BaseTabComponent } from 'tabby-core';
+
+/** Recovery token type of the hosts tab */
+export const WARPGATE_HOSTS_RECOVERY_TYPE = 'app:warpgate-hosts';
 
 /**
  * Tab component for displaying Warpgate hosts
@@ -28,8 +31,7 @@ import { BaseTabComponent } from 'tabby-core';
     .warpgate-hosts-tab {
       height: 100%;
       width: 100%;
-      overflow: auto;
-      background: var(--bs-body-bg, #1e1e1e);
+      overflow: hidden;
     }
   `],
 })
@@ -43,13 +45,26 @@ export class WarpgateHostsTabComponent extends BaseTabComponent {
     this.icon = 'fas fa-network-wired';
   }
 
-  ngOnInit(): void {
-    // Tab initialized
-  }
-
   async getRecoveryToken(): Promise<any> {
     return {
-      type: 'app:warpgate-hosts',
+      type: WARPGATE_HOSTS_RECOVERY_TYPE,
     };
   }
+}
+
+/**
+ * Open the Warpgate Hosts tab, or focus it if it is already open
+ */
+export function openWarpgateHostsTab(app: AppService): void {
+  for (const tab of app.tabs) {
+    const children: any[] = typeof (tab as any).getAllTabs === 'function' ? (tab as any).getAllTabs() : [tab];
+    if (tab instanceof WarpgateHostsTabComponent || children.some(child => child instanceof WarpgateHostsTabComponent)) {
+      app.selectTab(tab);
+      return;
+    }
+  }
+
+  app.openNewTab({
+    type: WarpgateHostsTabComponent,
+  });
 }
