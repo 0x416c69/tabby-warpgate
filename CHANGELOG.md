@@ -1,5 +1,11 @@
 # Changelog
 
+## 1.1.1
+
+### Fixed
+
+- Installing from Tabby's plugin manager failed on Windows with "[object Object]". Tabby's own packages (tabby-core, tabby-ssh, Angular, ...) are now optional peer dependencies, so the installer no longer downloads them and no longer runs tabby-ssh's install script (#3, thanks @etnperlong)
+
 ## 1.1.0
 
 A big update that turns the plugin into a full host manager for Warpgate.
