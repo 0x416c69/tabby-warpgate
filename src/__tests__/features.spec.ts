@@ -415,6 +415,7 @@ describe('Host search', () => {
     displayName: name,
     icon: '',
     color: '',
+    os: null,
     online: true,
     pinned: false,
     searchText: name,

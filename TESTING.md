@@ -110,6 +110,12 @@ profile descriptions for Tabby's selector and delegation to Tabby's SSH provider
 Host settings, snippets, connection history, profile IDs, prompt detection, target icons and colors,
 host search ranking, split layout and hotkey defaults.
 
+### 9. **OS Detection Tests** ([os-detection.spec.ts](src/__tests__/os-detection.spec.ts))
+
+- Parsing `uname`, `/etc/os-release`, `sw_vers` and `ver` output (distributions, look-alikes, macOS, BSD, Windows)
+- Running commands on a separate exec channel: output, timeout, refused requests
+- When to detect (once a day per host, one at a time, setting off), stored results, icons and colors
+
 ## Key Testing Principles
 
 ### 1. **Proxy-Based Config Testing**
@@ -253,6 +259,7 @@ TABBY_PLUGINS=$(dirname $(pwd)) tabby --debug
 | Modes | "Password only" and "Tickets only" (clear error for users who cannot create tickets) |
 | OTP | Set up OTP and Disable OTP from settings; restart Tabby to check login with the stored secret |
 | Hosts | Alias, color, tags, notes, pinning, search, quick connect (Ctrl+Shift+K), Ctrl+Shift+H |
+| OS detection | After connecting, the host shows its OS logo and version; nothing appears in the terminal |
 | Automation | Startup snippet, snippet in one/all sessions, Ctrl+Shift+J, connect several hosts and run |
 | Forwarding | Local port forward reaches its destination through Warpgate |
 | Themes | Hosts panel in dark and light color schemes |

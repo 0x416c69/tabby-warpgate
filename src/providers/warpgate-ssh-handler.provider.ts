@@ -1,7 +1,8 @@
 /**
  * Warpgate SSH Handler Provider
  * Prepares Warpgate SSH tabs before every connection attempt (fresh one-time ticket,
- * host settings) and answers keyboard-interactive password and OTP prompts
+ * host settings), answers keyboard-interactive password and OTP prompts and
+ * detects the operating system of hosts once connected
  */
 
 import { Injectable, Inject } from '@angular/core';
@@ -9,6 +10,7 @@ import { AppService, TabsService } from 'tabby-core';
 import { WarpgateService } from '../services/warpgate.service';
 import { WarpgateHostSettingsService } from '../services/host-settings.service';
 import { WarpgateHistoryService } from '../services/history.service';
+import { WarpgateOsDetectionService } from '../services/os-detection.service';
 import { WarpgateSSHProfile } from '../services/warpgate-profile.service';
 import { WarpgateProfileKind, parseWarpgateProfileId } from '../utils/profile-id';
 import { isOtpPrompt, isPasswordPrompt } from '../utils/prompt-detection';
@@ -71,7 +73,8 @@ export class WarpgateSshHandler {
     @Inject(WarpgateService) private warpgateService: WarpgateService,
     @Inject(WarpgateHostSettingsService) private hostSettings: WarpgateHostSettingsService,
     @Inject(WarpgateHistoryService) private history: WarpgateHistoryService,
-    @Inject(TabsService) private tabsService: TabsService
+    @Inject(TabsService) private tabsService: TabsService,
+    @Inject(WarpgateOsDetectionService) private osDetection: WarpgateOsDetectionService
   ) {
     this.init();
   }
@@ -254,8 +257,18 @@ export class WarpgateSshHandler {
       } catch (error) {
         log.error('Failed to prepare Warpgate connection:', error);
       }
-      return original.apply(this, args);
+      const result = await original.apply(this, args);
+      self.afterConnection(tab, state);
+      return result;
     };
+  }
+
+  /**
+   * Work done once a tab is connected, without delaying the session
+   */
+  private afterConnection(tab: any, state: WarpgateTabState): void {
+    this.osDetection.detectOverSession(state.serverId, state.targetName, tab.sshSession)
+      .catch(error => log.debug('OS detection failed:', error));
   }
 
   /**

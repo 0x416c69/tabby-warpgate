@@ -82,7 +82,7 @@ interface LoadTargetsResult {
 const ARRAY_CONFIG_KEYS: Array<keyof WarpgatePluginConfig> = ['servers', 'pinnedHosts', 'snippets', 'history'];
 
 /** Plugin config keys that hold plain objects (maps) */
-const OBJECT_CONFIG_KEYS: Array<keyof WarpgatePluginConfig> = ['hostSettings'];
+const OBJECT_CONFIG_KEYS: Array<keyof WarpgatePluginConfig> = ['hostSettings', 'hostOs'];
 
 /**
  * Create a fresh copy of the default plugin configuration
@@ -95,6 +95,7 @@ function createDefaultConfig(): WarpgatePluginConfig {
     hostSettings: {},
     snippets: [],
     history: [],
+    hostOs: {},
   };
 }
 

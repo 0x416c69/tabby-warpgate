@@ -148,6 +148,18 @@ export interface WarpgateSnippet {
   tags?: string[];
 }
 
+/** Operating system detected on a host */
+export interface WarpgateHostOs {
+  /** Normalized identifier used for the icon, e.g. "ubuntu", "debian", "macos", "windows", "linux" */
+  id: string;
+  /** Short name, e.g. "Ubuntu 24.04" */
+  label: string;
+  /** Full name, e.g. "Ubuntu 24.04.1 LTS" */
+  name: string;
+  /** When the operating system was detected (ms since epoch) */
+  detectedAt: number;
+}
+
 /** Connection history entry (one per host, most recent first) */
 export interface WarpgateHistoryEntry {
   serverId: string;
@@ -202,6 +214,10 @@ export interface WarpgatePluginConfig {
   snippets: WarpgateSnippet[];
   /** Connection history, most recent first */
   history: WarpgateHistoryEntry[];
+  /** Detect the operating system of hosts after connecting (shown as host icon) */
+  detectOs: boolean;
+  /** Detected operating systems by host key ("serverId:targetName") */
+  hostOs: Record<string, WarpgateHostOs>;
 }
 
 /** Maximum number of hosts kept in the connection history */
@@ -221,6 +237,8 @@ export const DEFAULT_WARPGATE_CONFIG: WarpgatePluginConfig = {
   hostSettings: {},
   snippets: [],
   history: [],
+  detectOs: true,
+  hostOs: {},
 };
 
 /**

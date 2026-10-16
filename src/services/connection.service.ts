@@ -20,7 +20,6 @@ import { WarpgateHostSettingsService } from './host-settings.service';
 import { WarpgateHistoryService } from './history.service';
 import { WarpgateSshHandler } from '../providers/warpgate-ssh-handler.provider';
 import { WarpgateServerConfig, WarpgateTarget, getHostKey } from '../models/warpgate.models';
-import { getTargetColor, getTargetIcon } from '../utils/target-appearance';
 import { createLogger } from '../utils/debug-logger';
 
 const log = createLogger('Connection');
@@ -224,9 +223,11 @@ export class WarpgateConnectionService {
         weight = -1000 + recentIndex;
       }
 
+      const appearance = this.hostSettings.getAppearance(server.id, target);
       const description = [
         settings.alias ? target.name : '',
         server.name,
+        appearance.os?.label,
         target.description,
         ...(settings.tags ?? []).map(tag => `#${tag}`),
       ].filter(Boolean).join(' · ');
@@ -235,8 +236,8 @@ export class WarpgateConnectionService {
         name: settings.alias || target.name,
         description,
         group,
-        icon: getTargetIcon(target),
-        color: settings.color || getTargetColor(target),
+        icon: appearance.icon,
+        color: appearance.color,
         weight,
         callback: () => {
           this.openHost(server, target);

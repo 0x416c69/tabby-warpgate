@@ -10,7 +10,6 @@ import { SSHProfile } from 'tabby-ssh';
 import { WarpgateService } from './warpgate.service';
 import { WarpgateHostSettingsService } from './host-settings.service';
 import { WarpgateTarget, WarpgateServerConfig } from '../models/warpgate.models';
-import { BOOTSTRAP_COLORS, THEME_ICONS } from '../models/theme.constants';
 import { WarpgateProfileKind, buildWarpgateProfileId, parseWarpgateProfileId } from '../utils/profile-id';
 import { createLogger } from '../utils/debug-logger';
 
@@ -241,13 +240,16 @@ export class WarpgateProfileProvider extends ProfileProvider<WarpgateSSHProfile>
       options.scripts = sshOptions.scripts;
     }
 
+    // Same icon and color as in the hosts panel (detected OS, custom color)
+    const appearance = this.hostSettings.getAppearance(server.id, target);
+
     return {
       id: buildWarpgateProfileId(server.id, target.name, kind),
       type: 'ssh',
       name: settings.alias || target.name,
       group: `Warpgate/${groupName}`,
-      icon: this.getIconForTarget(target),
-      color: settings.color || this.getColorForTarget(target),
+      icon: appearance.icon,
+      color: appearance.color,
       isBuiltin: true,
       isTemplate: false,
       options: options as WarpgateSSHProfile['options'],
@@ -259,23 +261,6 @@ export class WarpgateProfileProvider extends ProfileProvider<WarpgateSSHProfile>
         groupName: target.group?.name,
       },
     };
-  }
-
-  /**
-   * Get icon for a target based on its properties
-   */
-  private getIconForTarget(target: WarpgateTarget): string {
-    if (target.group?.color) {
-      return THEME_ICONS[target.group.color] || 'fas fa-server';
-    }
-    return 'fas fa-server';
-  }
-
-  /**
-   * Get color for a target
-   */
-  private getColorForTarget(target: WarpgateTarget): string | undefined {
-    return target.group?.color ? BOOTSTRAP_COLORS[target.group.color] : undefined;
   }
 
   /**

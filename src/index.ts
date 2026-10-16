@@ -140,6 +140,8 @@ export * from './services/host-settings.service';
 export * from './services/history.service';
 export * from './services/snippets.service';
 export * from './services/connection.service';
+export * from './services/os-detection.service';
 export * from './providers/warpgate-keyboard-interactive.provider';
 export * from './utils/totp';
 export * from './utils/profile-id';
+export * from './utils/os-detection';

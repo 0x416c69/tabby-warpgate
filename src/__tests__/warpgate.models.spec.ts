@@ -32,6 +32,8 @@ describe('Warpgate Models', () => {
         hostSettings: {},
         snippets: [],
         history: [],
+        detectOs: true,
+        hostOs: {},
       });
     });
 
@@ -201,6 +203,8 @@ describe('Warpgate Models', () => {
         hostSettings: {},
         snippets: [],
         history: [],
+        detectOs: true,
+        hostOs: {},
       };
 
       expect(config.servers).toHaveLength(1);

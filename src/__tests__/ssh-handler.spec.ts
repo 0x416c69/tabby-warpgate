@@ -119,6 +119,7 @@ describe('WarpgateSshHandler', () => {
   let hostSettings: WarpgateHostSettingsService;
   let history: { recordConnection: jest.Mock };
   let tabsService: { create: (params: any) => any };
+  let osDetection: { detectOverSession: jest.Mock };
   let handler: WarpgateSshHandler;
 
   beforeEach(() => {
@@ -128,8 +129,9 @@ describe('WarpgateSshHandler', () => {
     history = { recordConnection: jest.fn() };
     // Like Tabby's TabsService.create(): instantiates the tab and assigns its inputs
     tabsService = { create: (params: any) => Object.assign(new params.type(params.inputs.profile), params.inputs) };
+    osDetection = { detectOverSession: jest.fn().mockResolvedValue(null) };
     handler = new WarpgateSshHandler(
-      app as any, warpgate as unknown as WarpgateService, hostSettings, history as any, tabsService as any
+      app as any, warpgate as unknown as WarpgateService, hostSettings, history as any, tabsService as any, osDetection as any
     );
   });
 
@@ -170,7 +172,8 @@ describe('WarpgateSshHandler', () => {
       app.tabs = [new FakeSplitTab([tab])];
 
       const lateHandler = new WarpgateSshHandler(
-        app as any, warpgate as unknown as WarpgateService, hostSettings, history as any, { create: jest.fn() } as any
+        app as any, warpgate as unknown as WarpgateService, hostSettings, history as any, { create: jest.fn() } as any,
+        osDetection as any
       );
 
       expect(lateHandler.isWarpgateTab(tab)).toBe(true);
@@ -190,7 +193,9 @@ describe('WarpgateSshHandler', () => {
 
     it('should hook tab creation only once', () => {
       const create = tabsService.create;
-      new WarpgateSshHandler(app as any, warpgate as unknown as WarpgateService, hostSettings, history as any, tabsService as any);
+      new WarpgateSshHandler(
+        app as any, warpgate as unknown as WarpgateService, hostSettings, history as any, tabsService as any, osDetection as any
+      );
       const tab = tabsService.create({ type: FakeSshTab, inputs: { profile: sshProfile('warpgate:wg-1:web') } });
 
       expect(tabsService.create).toBe(create);
@@ -328,6 +333,26 @@ describe('WarpgateSshHandler', () => {
         x11: false,
       }));
       expect(original.agentForward).toBe(true);
+    });
+
+    it('should detect the operating system once the tab is connected', async () => {
+      const tab = new FakeSshTab(sshProfile('warpgate:wg-1:web'));
+      (tab as any).sshSession = { ssh: {} };
+      app.tabOpened$.next(tab);
+
+      await tab.initializeSession();
+
+      expect(osDetection.detectOverSession).toHaveBeenCalledWith('wg-1', 'web', (tab as any).sshSession);
+    });
+
+    it('should not detect the operating system when connecting fails', async () => {
+      const tab = new FakeSshTab(sshProfile('warpgate:wg-1:web'));
+      jest.spyOn(tab, 'initializeSession').mockRejectedValueOnce(new Error('Authentication rejected'));
+      app.tabOpened$.next(tab);
+
+      await expect(tab.initializeSession()).rejects.toThrow('Authentication rejected');
+
+      expect(osDetection.detectOverSession).not.toHaveBeenCalled();
     });
 
     it('should send queued scripts once after the next connection', async () => {

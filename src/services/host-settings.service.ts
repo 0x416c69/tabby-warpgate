@@ -1,7 +1,7 @@
 /**
  * Warpgate Host Settings Service
- * Stores per-host customization (alias, tags, notes, color, SSH options)
- * and applies it to the SSH profiles used for connections
+ * Stores per-host customization (alias, tags, notes, color, SSH options) and the
+ * detected operating system, and applies them to the SSH profiles used for connections
  */
 
 import { Injectable, Inject } from '@angular/core';
@@ -9,15 +9,28 @@ import { Observable, Subject } from 'rxjs';
 
 import { WarpgateService } from './warpgate.service';
 import {
+  WarpgateHostOs,
   WarpgateHostSettings,
   WarpgatePortForward,
   WarpgateServerConfig,
   WarpgateTarget,
   getHostKey,
 } from '../models/warpgate.models';
+import { getTargetColor, getTargetIcon } from '../utils/target-appearance';
+import { getOsAppearance } from '../utils/os-detection';
 
 /** Port forward types accepted by Tabby */
 const PORT_FORWARD_TYPES = ['Local', 'Remote', 'Dynamic'];
+
+/** How a host is shown: icon, accent color and detected operating system */
+export interface WarpgateHostAppearance {
+  icon: string;
+  /** Custom color, or the automatic one */
+  color: string;
+  /** Color used when no custom color is set (OS brand color or keyword based) */
+  autoColor: string;
+  os: WarpgateHostOs | null;
+}
 
 /** SSH profile options managed by this service */
 export interface WarpgateManagedSshOptions {
@@ -132,18 +145,61 @@ export class WarpgateHostSettingsService {
    * Forget settings of every host of a server
    */
   removeServerSettings(serverId: string): void {
+    const prefix = `${serverId}:`;
     const all = { ...this.getAllSettings() };
-    let changed = false;
-    for (const key of Object.keys(all)) {
-      if (key.startsWith(`${serverId}:`)) {
-        delete all[key];
-        changed = true;
-      }
+    const allOs = { ...this.getAllDetectedOs() };
+    const settingKeys = Object.keys(all).filter(key => key.startsWith(prefix));
+    const osKeys = Object.keys(allOs).filter(key => key.startsWith(prefix));
+    if (settingKeys.length === 0 && osKeys.length === 0) {
+      return;
     }
-    if (changed) {
-      this.warpgate.saveConfig({ hostSettings: all });
-      this.changesSubject.next(serverId);
-    }
+
+    settingKeys.forEach(key => delete all[key]);
+    osKeys.forEach(key => delete allOs[key]);
+    this.warpgate.saveConfig({ hostSettings: all, hostOs: allOs });
+    this.changesSubject.next(serverId);
+  }
+
+  /**
+   * Detected operating systems of all hosts
+   */
+  getAllDetectedOs(): Record<string, WarpgateHostOs> {
+    const hostOs = this.warpgate.getConfig().hostOs;
+    return hostOs && typeof hostOs === 'object' ? hostOs : {};
+  }
+
+  /**
+   * Operating system detected on a host, null when unknown
+   */
+  getDetectedOs(serverId: string, targetName: string): WarpgateHostOs | null {
+    const os = this.getAllDetectedOs()[getHostKey(serverId, targetName)];
+    return os ? { ...os } : null;
+  }
+
+  /**
+   * Store the operating system detected on a host
+   */
+  setDetectedOs(serverId: string, targetName: string, os: WarpgateHostOs): void {
+    const key = getHostKey(serverId, targetName);
+    this.warpgate.saveConfig({ hostOs: { ...this.getAllDetectedOs(), [key]: { ...os } } });
+    this.changesSubject.next(key);
+  }
+
+  /**
+   * Icon and accent color of a host
+   * The detected operating system gives the icon; a custom color wins over the OS brand color
+   */
+  getAppearance(serverId: string, target: WarpgateTarget): WarpgateHostAppearance {
+    const settings = this.getSettings(serverId, target.name);
+    const os = this.getDetectedOs(serverId, target.name);
+    const osAppearance = os ? getOsAppearance(os.id) : null;
+    const autoColor = osAppearance?.color ?? getTargetColor(target);
+    return {
+      icon: osAppearance?.icon ?? getTargetIcon(target),
+      color: settings.color || autoColor,
+      autoColor,
+      os,
+    };
   }
 
   /**

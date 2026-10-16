@@ -8,13 +8,13 @@ import { AfterViewInit, Component, ElementRef, EventEmitter, Inject, Input, OnIn
 import { WarpgateHostSettingsService, describePortForward, normalizePortForward } from '../services/host-settings.service';
 import { WarpgateSnippetsService } from '../services/snippets.service';
 import {
+  WarpgateHostOs,
   WarpgateHostSettings,
   WarpgatePortForward,
   WarpgateServerConfig,
   WarpgateSnippet,
   WarpgateTarget,
 } from '../models/warpgate.models';
-import { getTargetColor, getTargetIcon } from '../utils/target-appearance';
 import { isElementActive } from '../utils/dom';
 import { HOST_COLOR_PRESETS, WARPGATE_THEME_STYLES } from './shared.styles';
 
@@ -32,7 +32,9 @@ type InheritableFlag = 'inherit' | 'on' | 'off';
         </div>
         <div class="editor-heading">
           <h3 class="wg-drawer-title">{{ alias.trim() || target.name }}</h3>
-          <div class="wg-drawer-subtitle">{{ target.name }} · {{ server.name }}</div>
+          <div class="wg-drawer-subtitle">
+            {{ target.name }} · {{ server.name }}<span *ngIf="os" [title]="os.name"> · {{ os.label }}</span>
+          </div>
         </div>
         <button class="wg-icon-btn" (click)="cancel()" title="Close (Esc)" aria-label="Close">
           <i class="fas fa-times"></i>
@@ -293,6 +295,7 @@ export class WarpgateHostEditorComponent implements OnInit, AfterViewInit {
   snippets: WarpgateSnippet[] = [];
   icon = 'fas fa-server';
   autoColor = '#6366f1';
+  os: WarpgateHostOs | null = null;
   private allTags: string[] = [];
   private original: WarpgateHostSettings = {};
 
@@ -306,8 +309,10 @@ export class WarpgateHostEditorComponent implements OnInit, AfterViewInit {
     this.original = this.hostSettings.getSettings(this.server.id, this.target.name);
     this.snippets = this.snippetsService.getSnippets();
     this.allTags = this.hostSettings.getAllTags();
-    this.icon = getTargetIcon(this.target);
-    this.autoColor = getTargetColor(this.target);
+    const appearance = this.hostSettings.getAppearance(this.server.id, this.target);
+    this.icon = appearance.icon;
+    this.autoColor = appearance.autoColor;
+    this.os = appearance.os;
 
     const settings = this.original;
     this.alias = settings.alias ?? '';

@@ -20,13 +20,13 @@ No `user:target@host` strings. No passwords. No copying 2FA codes from your phon
 
 <br>
 
-<img src="docs/images/hero.png" alt="Tabby Warpgate hosts panel: Warpgate SSH targets grouped by server with tags, pinned hosts and recent connections" width="100%">
+<img src="docs/images/hero.png" alt="Tabby Warpgate hosts panel: Warpgate SSH targets with OS logos, grouped by server with tags, pinned hosts and recent connections" width="100%">
 
 </div>
 
 <br>
 
-**Tabby Warpgate** is a free, open-source [Tabby](https://tabby.sh/) plugin that turns your [Warpgate](https://github.com/warp-tech/warpgate) account into a full **SSH host manager**. Every SSH target you can reach through the Warpgate bastion (jump host) shows up automatically. You connect with one click using single-use tickets, or with password and **automatic TOTP two-factor codes**. On top of that you get tags, notes, colors, a snippet library, connection history, port forwarding and multi-host sessions: the comfort of a paid SSH client like Termius, for teams that put their servers behind Warpgate.
+**Tabby Warpgate** is a free, open-source [Tabby](https://tabby.sh/) plugin that turns your [Warpgate](https://github.com/warp-tech/warpgate) account into a full **SSH host manager**. Every SSH target you can reach through the Warpgate bastion (jump host) shows up automatically. You connect with one click using single-use tickets, or with password and **automatic TOTP two-factor codes**. On top of that you get OS detection with distro logos, tags, notes, colors, a snippet library, connection history, port forwarding and multi-host sessions: the comfort of a paid SSH client like Termius, for teams that put their servers behind Warpgate.
 
 ## 💡 Why
 
@@ -37,7 +37,8 @@ Warpgate is a great SSH gateway: one entry point, per-user roles, session record
 | Adding hosts | Create a profile per target by hand | Every target you have access to appears automatically |
 | Logging in | Password + OTP code on every connection | One click, with a single-use ticket |
 | Reconnecting | Type everything again | A new ticket is created for you, also for duplicated, split and restored tabs |
-| Finding a host | Scroll through a profile list | Fuzzy search by name, `#tag`, notes or server, from any tab |
+| Finding a host | Scroll through a profile list | Fuzzy search by name, `#tag`, notes, server or OS, from any tab |
+| Knowing what runs where | Log in and check | The OS logo and version on every host, detected automatically |
 | Repeated commands | Copy and paste | Snippet library, startup snippets, run on many hosts at once |
 | Several gateways | Separate profile sets | Any number of Warpgate servers side by side |
 
@@ -65,8 +66,9 @@ Warpgate is a great SSH gateway: one entry point, per-user roles, session record
 
 ### 🗂️ Organize
 
+- **OS detection**: Ubuntu, Debian, Red Hat, Alpine, macOS, Windows and more get their logo and version
 - **Aliases, tags, notes and colors** per host
-- **Search** across names, descriptions, servers, groups, `#tags` and notes
+- **Search** across names, descriptions, servers, groups, `#tags`, notes and OS
 - **Pinned hosts**, server and tag filters
 - **Card and list layouts**, collapsible groups
 - **"Jump back in"** row and a full connection history
@@ -265,6 +267,7 @@ All global shortcuts can be changed in **Settings → Hotkeys** ("Warpgate: …"
 | **Authentication** | Automatic, tickets only or password only |
 | **Group hosts by server** | Group by server and Warpgate group, or by Warpgate group only |
 | **Show hosts of offline servers** | Keep showing hosts of servers that are currently unreachable |
+| **Detect the operating system of hosts** | Show OS logos and versions (see the FAQ for how it works) |
 | **Debug logging** | Detailed logs in the developer console (secrets are never logged) |
 | **SSH defaults** (per server) | Agent forwarding, X11 forwarding and keepalive for all hosts of a server |
 
@@ -348,6 +351,13 @@ Install this plugin, add your Warpgate server under **Settings → Warpgate**, a
 <summary><b>Is this a Termius alternative?</b></summary>
 
 For servers behind Warpgate, yes. You get a host list with tags, notes and colors, quick connect, a snippet library, connection history, port forwarding and multi-host sessions, all free and open source, inside a terminal you already use.
+
+</details>
+
+<details>
+<summary><b>How does OS detection work?</b></summary>
+
+After you connect to a host, the plugin opens a second, hidden channel on the same SSH connection and runs `uname -s` and `cat /etc/os-release` (`sw_vers` on macOS, `cmd /c ver` on Windows). Nothing is typed into your terminal and no extra login is needed. Each host is checked at most once a day. Warpgate records the command like any other, so you will see it in its audit log. You can turn detection off in **Settings → Warpgate**.
 
 </details>
 

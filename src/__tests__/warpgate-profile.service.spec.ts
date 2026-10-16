@@ -5,6 +5,7 @@
 import { WarpgateProfileProvider } from '../services/warpgate-profile.service';
 import { WarpgateHostSettingsService } from '../services/host-settings.service';
 import { WarpgateService } from '../services/warpgate.service';
+import { getTargetColor, getTargetIcon } from '../utils/target-appearance';
 import {
   WarpgateServerConfig,
   WarpgateTarget,
@@ -194,10 +195,22 @@ describe('WarpgateProfileProvider', () => {
         .toThrow('Cannot get connection details');
     });
 
-    it('should set color based on group color', () => {
+    it('should use the same icon and color as the hosts panel', () => {
       const profile = provider.createProfileFromTarget(mockServer, mockTarget);
 
-      expect(profile.color).toBe('#28a745'); // success color
+      expect(profile.icon).toBe(getTargetIcon(mockTarget));
+      expect(profile.color).toBe(getTargetColor(mockTarget));
+    });
+
+    it('should use the icon and brand color of the detected operating system', () => {
+      hostSettings.setDetectedOs('server-1', 'production-web', {
+        id: 'debian', label: 'Debian 12', name: 'Debian GNU/Linux 12 (bookworm)', detectedAt: Date.now(),
+      });
+
+      const profile = provider.createProfileFromTarget(mockServer, mockTarget);
+
+      expect(profile.icon).toBe('fab fa-debian');
+      expect(profile.color).toBe('#a81d33');
     });
 
     it('should keep Tabby defaults when the host has no customization', () => {

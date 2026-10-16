@@ -16,13 +16,13 @@ import {
   WarpgateTarget,
   WarpgateServerConfig,
   WarpgateConnectionStatus,
+  WarpgateHostOs,
   WarpgateHostSettings,
   WarpgatePluginConfig,
   WarpgateSnippet,
   getHostKey,
 } from '../models/warpgate.models';
 import { getBootstrapColor } from '../models/theme.constants';
-import { getTargetColor, getTargetIcon } from '../utils/target-appearance';
 import { createLogger } from '../utils/debug-logger';
 import { isElementActive } from '../utils/dom';
 import { WARPGATE_THEME_STYLES } from './shared.styles';
@@ -41,6 +41,8 @@ export interface HostItem {
   displayName: string;
   icon: string;
   color: string;
+  /** Detected operating system */
+  os: WarpgateHostOs | null;
   online: boolean;
   pinned: boolean;
   lastConnectedAt?: number;
@@ -340,7 +342,7 @@ export function scoreHost(host: HostItem, query: string, now: number = Date.now(
                   (keydown.enter)="onHostClick(host, $event)"
                 >
                   <div class="card-top">
-                    <div class="avatar">
+                    <div class="avatar" [title]="host.os?.name || ''">
                       <i [class]="host.icon"></i>
                       <span class="avatar-status" [class.online]="host.online"></span>
                     </div>
@@ -352,6 +354,8 @@ export function scoreHost(host: HostItem, query: string, now: number = Date.now(
                         <span *ngIf="host.settings.alias" class="mono">{{ host.target.name }}</span>
                         <span *ngIf="host.settings.alias" class="sep">·</span>
                         <span>{{ host.server.name }}</span>
+                        <span *ngIf="host.os" class="sep">·</span>
+                        <span *ngIf="host.os" class="os-label" [title]="host.os.name">{{ host.os.label }}</span>
                       </div>
                     </div>
                     <div class="card-tools" *ngIf="!selectionMode">
@@ -411,7 +415,7 @@ export function scoreHost(host: HostItem, query: string, now: number = Date.now(
                   (keydown.enter)="onHostClick(host, $event)"
                 >
                   <div class="select-box" *ngIf="selectionMode" aria-hidden="true"><i class="fas fa-check"></i></div>
-                  <span class="avatar sm"><i [class]="host.icon"></i></span>
+                  <span class="avatar sm" [title]="host.os?.name || ''"><i [class]="host.icon"></i></span>
                   <div class="row-main">
                     <span class="host-name">{{ host.displayName }}</span>
                     <span class="host-sub">
@@ -692,6 +696,7 @@ export function scoreHost(host: HostItem, query: string, now: number = Date.now(
     .host-name { font-size: 14.5px; font-weight: 750; letter-spacing: -0.012em; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
     .host-sub { display: flex; gap: 5px; font-size: 12px; color: var(--wg-subtle); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
     .host-sub .sep { opacity: 0.6; }
+    .host-sub .os-label { overflow: hidden; text-overflow: ellipsis; }
     .mono { font-family: var(--wg-mono); font-size: 11.5px; }
 
     .card-tools, .row-tools { display: flex; gap: 2px; }
@@ -1004,14 +1009,16 @@ export class WarpgateHostsComponent implements OnInit, OnDestroy {
     const key = getHostKey(server.id, target.name);
     const settings = this.hostSettings.getSettings(server.id, target.name);
     const displayName = settings.alias || target.name;
+    const appearance = this.hostSettings.getAppearance(server.id, target);
     return {
       key,
       server,
       target,
       settings,
       displayName,
-      icon: getTargetIcon(target),
-      color: settings.color || getTargetColor(target),
+      icon: appearance.icon,
+      color: appearance.color,
+      os: appearance.os,
       online: this.isServerConnected(server.id),
       pinned: pinned.has(key),
       lastConnectedAt: lastConnected.get(key),
@@ -1022,6 +1029,7 @@ export class WarpgateHostsComponent implements OnInit, OnDestroy {
         server.name,
         target.group?.name,
         settings.notes,
+        appearance.os?.name,
         ...(settings.tags ?? []),
       ].filter(Boolean).join(' ').toLowerCase(),
     };

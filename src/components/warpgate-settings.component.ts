@@ -323,6 +323,10 @@ const REFRESH_INTERVALS = [
             <input type="checkbox" [(ngModel)]="config.showOfflineServers" (ngModelChange)="savePluginConfig()" />
             <span class="track"></span> Show hosts of offline servers
           </label>
+          <label class="wg-switch" title="Runs uname and reads /etc/os-release on a separate channel after connecting">
+            <input type="checkbox" [(ngModel)]="config.detectOs" (ngModelChange)="savePluginConfig()" />
+            <span class="track"></span> Detect the operating system of hosts (OS icons)
+          </label>
           <label class="wg-switch">
             <input type="checkbox" [(ngModel)]="config.debugMode" (ngModelChange)="savePluginConfig()" />
             <span class="track"></span> Debug logging (developer console)
@@ -731,6 +735,7 @@ export class WarpgateSettingsComponent implements OnInit, OnDestroy {
       sortBy: this.config.sortBy,
       authMethod: this.config.authMethod,
       debugMode: this.config.debugMode,
+      detectOs: this.config.detectOs !== false,
     });
   }
 
