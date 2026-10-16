@@ -81,9 +81,12 @@
     "tabby-terminal": "*"
   },
   "peerDependenciesMeta": {
-    "tabby-core": { "optional": false },
-    "tabby-settings": { "optional": false },
-    "tabby-ssh": { "optional": false },
+    "@angular/common": { "optional": true },
+    "@angular/core": { "optional": true },
+    "@angular/forms": { "optional": true },
+    "tabby-core": { "optional": true },
+    "tabby-settings": { "optional": true },
+    "tabby-ssh": { "optional": true },
     "tabby-terminal": { "optional": true }
   },
   "repository": {
