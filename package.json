@@ -1,6 +1,6 @@
 {
   "name": "tabby-warpgate",
-  "version": "1.0.2",
+  "version": "1.1.0",
   "description": "Warpgate SSH client for Tabby: one-click logins through your Warpgate bastion, automatic TOTP 2FA, host tags, snippets, history and port forwarding",
   "keywords": [
     "tabby-plugin",
