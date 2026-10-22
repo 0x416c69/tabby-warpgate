@@ -345,6 +345,46 @@ describe('WarpgateSshHandler', () => {
       expect(osDetection.detectOverSession).toHaveBeenCalledWith('wg-1', 'web', (tab as any).sshSession);
     });
 
+    it('should send the terminal size again once the tab is connected', async () => {
+      jest.useFakeTimers();
+      try {
+        const tab = new FakeSshTab(sshProfile('warpgate:wg-1:web'));
+        const session = { open: true, resize: jest.fn() };
+        Object.assign(tab, { session, size: { columns: 235, rows: 54 } });
+        app.tabOpened$.next(tab);
+
+        await tab.initializeSession();
+        expect(session.resize).not.toHaveBeenCalled();
+
+        jest.advanceTimersByTime(2000);
+        expect(session.resize).toHaveBeenCalledTimes(2);
+        expect(session.resize).toHaveBeenLastCalledWith(235, 54);
+      } finally {
+        jest.useRealTimers();
+      }
+    });
+
+    it('should not resize a session that was closed or replaced', async () => {
+      jest.useFakeTimers();
+      try {
+        const tab = new FakeSshTab(sshProfile('warpgate:wg-1:web'));
+        const session = { open: true, resize: jest.fn() };
+        Object.assign(tab, { session, size: { columns: 235, rows: 54 } });
+        app.tabOpened$.next(tab);
+
+        await tab.initializeSession();
+        session.open = false;
+        jest.advanceTimersByTime(500);
+        session.open = true;
+        (tab as any).session = { open: true, resize: jest.fn() };
+        jest.advanceTimersByTime(1500);
+
+        expect(session.resize).not.toHaveBeenCalled();
+      } finally {
+        jest.useRealTimers();
+      }
+    });
+
     it('should not detect the operating system when connecting fails', async () => {
       const tab = new FakeSshTab(sshProfile('warpgate:wg-1:web'));
       jest.spyOn(tab, 'initializeSession').mockRejectedValueOnce(new Error('Authentication rejected'));
