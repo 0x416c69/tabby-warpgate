@@ -24,6 +24,13 @@ const PASSWORD_RETRY_GUARD_MS = 5000;
 /** Polling interval when the prompt property cannot be intercepted */
 const PROMPT_POLL_INTERVAL_MS = 250;
 
+/**
+ * Send the terminal size again after connecting, at these delays
+ * Warpgate drops window-change requests received while it is still connecting to the target,
+ * which leaves the shell at the 80x24 size the PTY was opened with
+ */
+const RESIZE_RETRY_DELAYS_MS = [500, 2000];
+
 /** Tab services whose create() is already hooked */
 const hookedTabServices = new WeakSet<object>();
 
@@ -267,8 +274,27 @@ export class WarpgateSshHandler {
    * Work done once a tab is connected, without delaying the session
    */
   private afterConnection(tab: any, state: WarpgateTabState): void {
+    this.resendTerminalSize(tab);
     this.osDetection.detectOverSession(state.serverId, state.targetName, tab.sshSession)
       .catch(error => log.debug('OS detection failed:', error));
+  }
+
+  /**
+   * Send the tab's current terminal size to the session again a few times
+   */
+  private resendTerminalSize(tab: any): void {
+    const session = tab.session;
+    if (!session || typeof session.resize !== 'function') {
+      return;
+    }
+    for (const delay of RESIZE_RETRY_DELAYS_MS) {
+      setTimeout(() => {
+        // Skip sessions replaced by a reconnection or already closed
+        if (tab.session === session && session.open && tab.size?.columns && tab.size?.rows) {
+          session.resize(tab.size.columns, tab.size.rows);
+        }
+      }, delay);
+    }
   }
 
   /**
